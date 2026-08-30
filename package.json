@@ -1,0 +1,98 @@
+{
+  "name": "anchor-agent",
+  "displayName": "Anchor Agent",
+  "description": "Asynchronous, anchored AI edits through MCP.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "main": "./dist/extension.cjs",
+  "bin": {
+    "anchor-agent-mcp": "./dist/mcp-server.cjs"
+  },
+  "activationEvents": [
+    "onCommand:anchorAgent.createTask",
+    "onView:anchorAgent.tasks"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "anchorAgent.createTask",
+        "title": "Anchor Agent: Rewrite Selection"
+      },
+      {
+        "command": "anchorAgent.reviewTask",
+        "title": "Anchor Agent: Review Task"
+      },
+      {
+        "command": "anchorAgent.acceptTask",
+        "title": "Anchor Agent: Accept Candidate"
+      },
+      {
+        "command": "anchorAgent.cancelTask",
+        "title": "Anchor Agent: Cancel Task"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "anchorAgent.createTask",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "anchorAgent.tasks",
+          "name": "Anchor Agent Tasks"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Anchor Agent",
+      "properties": {
+        "anchorAgent.conflictPolicy": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "autoMergeAndReview",
+            "regenerateOnChange"
+          ],
+          "default": "prompt",
+          "description": "How to handle edits made inside an active anchor."
+        },
+        "anchorAgent.allowWorkspaceReads": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow connected MCP agents to read files in the current workspace."
+        },
+        "anchorAgent.allowWorkspaceSearch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow connected MCP agents to search the current workspace."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "watch": "node ./scripts/build.mjs --watch",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
