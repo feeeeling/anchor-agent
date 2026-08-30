@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as vscode from "vscode";
@@ -43,11 +48,16 @@ export class BridgeServer implements vscode.Disposable {
       endpoint: this.endpoint,
       token: this.token,
       pid: process.pid,
-      workspaceFolders: vscode.workspace.workspaceFolders?.map((folder) => folder.uri.toString()) ?? [],
+      workspaceFolders:
+        vscode.workspace.workspaceFolders?.map((folder) =>
+          folder.uri.toString(),
+        ) ?? [],
       updatedAt: Date.now(),
     };
     await mkdir(dirname(DESCRIPTOR_PATH), { recursive: true, mode: 0o700 });
-    await writeFile(DESCRIPTOR_PATH, JSON.stringify(descriptor, null, 2), { mode: 0o600 });
+    await writeFile(DESCRIPTOR_PATH, JSON.stringify(descriptor, null, 2), {
+      mode: 0o600,
+    });
     await chmod(DESCRIPTOR_PATH, 0o600);
   }
 
@@ -56,7 +66,10 @@ export class BridgeServer implements vscode.Disposable {
     void this.removeOwnedDescriptor();
   }
 
-  private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private async handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
     try {
       if (request.headers.authorization !== `Bearer ${this.token}`) {
         this.json(response, 401, { error: "Unauthorized" });
@@ -64,9 +77,15 @@ export class BridgeServer implements vscode.Disposable {
       }
       const url = new URL(request.url ?? "/", this.endpoint);
       const taskMatch = /^\/v1\/tasks\/([^/]+)$/.exec(url.pathname);
-      const progressMatch = /^\/v1\/tasks\/([^/]+)\/progress$/.exec(url.pathname);
-      const revisionsMatch = /^\/v1\/tasks\/([^/]+)\/revisions$/.exec(url.pathname);
-      const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(url.pathname);
+      const progressMatch = /^\/v1\/tasks\/([^/]+)\/progress$/.exec(
+        url.pathname,
+      );
+      const revisionsMatch = /^\/v1\/tasks\/([^/]+)\/revisions$/.exec(
+        url.pathname,
+      );
+      const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(
+        url.pathname,
+      );
 
       if (request.method === "GET" && url.pathname === "/v1/tasks") {
         this.json(response, 200, {
@@ -101,14 +120,22 @@ export class BridgeServer implements vscode.Disposable {
       }
       if (request.method === "POST" && revisionsMatch?.[1]) {
         const body = await this.readBody<
-          Omit<Revision, "id" | "createdAt" | "warnings"> & { warnings?: string[] }
+          Omit<Revision, "id" | "createdAt" | "warnings"> & {
+            warnings?: string[];
+          }
         >(request);
-        const revision = await this.tasks.submitRevision(decodeURIComponent(revisionsMatch[1]), body);
+        const revision = await this.tasks.submitRevision(
+          decodeURIComponent(revisionsMatch[1]),
+          body,
+        );
         this.json(response, 201, revision);
         return;
       }
       if (request.method === "POST" && clarificationMatch?.[1]) {
-        const body = await this.readBody<{ question: string; options?: string[] }>(request);
+        const body = await this.readBody<{
+          question: string;
+          options?: string[];
+        }>(request);
         const task = await this.tasks.requestClarification(
           decodeURIComponent(clarificationMatch[1]),
           body.question,
@@ -124,7 +151,10 @@ export class BridgeServer implements vscode.Disposable {
     }
   }
 
-  private async readDocument(url: URL, response: ServerResponse): Promise<void> {
+  private async readDocument(
+    url: URL,
+    response: ServerResponse,
+  ): Promise<void> {
     const taskId = url.searchParams.get("taskId");
     const uriValue = url.searchParams.get("uri");
     const mode = url.searchParams.get("mode") ?? "snapshot";
@@ -160,10 +190,18 @@ export class BridgeServer implements vscode.Disposable {
     if (Buffer.byteLength(content, "utf8") > MAX_DOCUMENT_BYTES) {
       throw new Error("Document exceeds the 2 MB bridge limit");
     }
-    this.json(response, 200, { uri: uriValue, mode, version: document.version, content });
+    this.json(response, 200, {
+      uri: uriValue,
+      mode,
+      version: document.version,
+      content,
+    });
   }
 
-  private async searchWorkspace(body: unknown, response: ServerResponse): Promise<void> {
+  private async searchWorkspace(
+    body: unknown,
+    response: ServerResponse,
+  ): Promise<void> {
     if (!this.workspaceSearchAllowed()) {
       throw new Error("Workspace search is disabled");
     }
@@ -191,7 +229,11 @@ export class BridgeServer implements vscode.Disposable {
       const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
       for (const [index, line] of lines.entries()) {
         if (line.includes(body.query)) {
-          matches.push({ uri: uri.toString(), line: index + 1, preview: line.slice(0, 500) });
+          matches.push({
+            uri: uri.toString(),
+            line: index + 1,
+            preview: line.slice(0, 500),
+          });
           if (matches.length >= maxResults) {
             break;
           }
@@ -202,11 +244,15 @@ export class BridgeServer implements vscode.Disposable {
   }
 
   private workspaceReadsAllowed(): boolean {
-    return vscode.workspace.getConfiguration("anchorAgent").get("allowWorkspaceReads", true);
+    return vscode.workspace
+      .getConfiguration("anchorAgent")
+      .get("allowWorkspaceReads", true);
   }
 
   private workspaceSearchAllowed(): boolean {
-    return vscode.workspace.getConfiguration("anchorAgent").get("allowWorkspaceSearch", true);
+    return vscode.workspace
+      .getConfiguration("anchorAgent")
+      .get("allowWorkspaceSearch", true);
   }
 
   private async readBody<T = unknown>(request: IncomingMessage): Promise<T> {
@@ -228,13 +274,17 @@ export class BridgeServer implements vscode.Disposable {
   }
 
   private json(response: ServerResponse, status: number, body: unknown): void {
-    response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+    response.writeHead(status, {
+      "content-type": "application/json; charset=utf-8",
+    });
     response.end(JSON.stringify(body));
   }
 
   private async removeOwnedDescriptor(): Promise<void> {
     try {
-      const descriptor = JSON.parse(await readFile(DESCRIPTOR_PATH, "utf8")) as ConnectionDescriptor;
+      const descriptor = JSON.parse(
+        await readFile(DESCRIPTOR_PATH, "utf8"),
+      ) as ConnectionDescriptor;
       if (descriptor.token === this.token) {
         await unlink(DESCRIPTOR_PATH);
       }
@@ -254,5 +304,7 @@ function isSearchRequest(value: unknown): value is {
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  return typeof candidate.taskId === "string" && typeof candidate.query === "string";
+  return (
+    typeof candidate.taskId === "string" && typeof candidate.query === "string"
+  );
 }

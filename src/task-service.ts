@@ -5,7 +5,12 @@ import { sha256 } from "./hash.js";
 import type { EditTask, Revision, TaskProgress, TextChange } from "./types.js";
 
 const STORAGE_KEY = "anchorAgent.tasks.v1";
-const TERMINAL_STATES = new Set(["applied", "rejected", "cancelled", "archived"]);
+const TERMINAL_STATES = new Set([
+  "applied",
+  "rejected",
+  "cancelled",
+  "archived",
+]);
 
 export class TaskService implements vscode.Disposable {
   private readonly tasks = new Map<string, EditTask>();
@@ -19,7 +24,9 @@ export class TaskService implements vscode.Disposable {
   }
 
   list(): EditTask[] {
-    return [...this.tasks.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+    return [...this.tasks.values()].sort(
+      (left, right) => right.updatedAt - left.updatedAt,
+    );
   }
 
   get(taskId: string): EditTask | undefined {
@@ -54,7 +61,9 @@ export class TaskService implements vscode.Disposable {
       revisions: [],
       createdAt: now,
       updatedAt: now,
-      ...(branch?.sourceSessionId ? { sourceSessionId: branch.sourceSessionId } : {}),
+      ...(branch?.sourceSessionId
+        ? { sourceSessionId: branch.sourceSessionId }
+        : {}),
       ...(branch?.sourceNodeId ? { sourceNodeId: branch.sourceNodeId } : {}),
     };
     this.tasks.set(task.id, task);
@@ -62,7 +71,10 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
-  async applyDocumentChanges(documentUri: string, changes: readonly TextChange[]): Promise<void> {
+  async applyDocumentChanges(
+    documentUri: string,
+    changes: readonly TextChange[],
+  ): Promise<void> {
     let didChange = false;
     for (const task of this.tasks.values()) {
       if (
@@ -73,7 +85,11 @@ export class TaskService implements vscode.Disposable {
         continue;
       }
       const transformed = transformAnchor(
-        { start: task.currentStart, end: task.currentEnd, state: task.anchorState },
+        {
+          start: task.currentStart,
+          end: task.currentEnd,
+          state: task.anchorState,
+        },
         changes,
       );
       task.currentStart = transformed.start;
@@ -81,7 +97,10 @@ export class TaskService implements vscode.Disposable {
       task.anchorState = transformed.state;
       if (transformed.state === "orphaned") {
         task.taskState = "orphaned";
-      } else if (transformed.state === "modified" && task.taskState === "ready") {
+      } else if (
+        transformed.state === "modified" &&
+        task.taskState === "ready"
+      ) {
         task.taskState = "conflicted";
       }
       task.updatedAt = Date.now();
@@ -92,7 +111,10 @@ export class TaskService implements vscode.Disposable {
     }
   }
 
-  async reportProgress(taskId: string, progress: TaskProgress): Promise<EditTask> {
+  async reportProgress(
+    taskId: string,
+    progress: TaskProgress,
+  ): Promise<EditTask> {
     const task = this.require(taskId);
     task.progress = progress;
     task.taskState = "running";
@@ -103,7 +125,9 @@ export class TaskService implements vscode.Disposable {
 
   async submitRevision(
     taskId: string,
-    candidate: Omit<Revision, "id" | "createdAt" | "warnings"> & { warnings?: string[] },
+    candidate: Omit<Revision, "id" | "createdAt" | "warnings"> & {
+      warnings?: string[];
+    },
   ): Promise<Revision> {
     const task = this.require(taskId);
     const revision: Revision = {
@@ -111,7 +135,9 @@ export class TaskService implements vscode.Disposable {
       replacement: candidate.replacement,
       warnings: candidate.warnings ?? [],
       createdAt: Date.now(),
-      ...(candidate.parentRevisionId ? { parentRevisionId: candidate.parentRevisionId } : {}),
+      ...(candidate.parentRevisionId
+        ? { parentRevisionId: candidate.parentRevisionId }
+        : {}),
       ...(candidate.instruction ? { instruction: candidate.instruction } : {}),
       ...(candidate.summary ? { summary: candidate.summary } : {}),
       ...(candidate.basedOnDocumentVersion === undefined
@@ -125,15 +151,20 @@ export class TaskService implements vscode.Disposable {
       message: "Candidate revision ready for review",
       percentage: 100,
     };
-    task.taskState = task.anchorState === "modified" || task.anchorState === "orphaned"
-      ? "conflicted"
-      : "ready";
+    task.taskState =
+      task.anchorState === "modified" || task.anchorState === "orphaned"
+        ? "conflicted"
+        : "ready";
     task.updatedAt = Date.now();
     await this.changed();
     return revision;
   }
 
-  async requestClarification(taskId: string, question: string, options?: string[]): Promise<EditTask> {
+  async requestClarification(
+    taskId: string,
+    question: string,
+    options?: string[],
+  ): Promise<EditTask> {
     const task = this.require(taskId);
     task.clarification = { question, ...(options?.length ? { options } : {}) };
     task.taskState = "waitingForUser";
@@ -142,7 +173,10 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
-  async setState(taskId: string, taskState: EditTask["taskState"]): Promise<EditTask> {
+  async setState(
+    taskId: string,
+    taskState: EditTask["taskState"],
+  ): Promise<EditTask> {
     const task = this.require(taskId);
     task.taskState = taskState;
     task.updatedAt = Date.now();

@@ -1,4 +1,9 @@
-export type AnchorState = "clean" | "shifted" | "modified" | "ambiguous" | "orphaned";
+export type AnchorState =
+  | "clean"
+  | "shifted"
+  | "modified"
+  | "ambiguous"
+  | "orphaned";
 
 export type TaskState =
   | "created"

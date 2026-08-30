@@ -5,9 +5,14 @@ import type { AnchorSpan, TextChange } from "./types.js";
  * processed from the end of the original document so their original offsets
  * remain valid while lower offsets are transformed.
  */
-export function transformAnchor(anchor: AnchorSpan, changes: readonly TextChange[]): AnchorSpan {
+export function transformAnchor(
+  anchor: AnchorSpan,
+  changes: readonly TextChange[],
+): AnchorSpan {
   let current = { ...anchor };
-  const ordered = [...changes].sort((left, right) => right.rangeOffset - left.rangeOffset);
+  const ordered = [...changes].sort(
+    (left, right) => right.rangeOffset - left.rangeOffset,
+  );
 
   for (const change of ordered) {
     current = transformOne(current, change);
@@ -55,7 +60,8 @@ function transformOne(anchor: AnchorSpan, change: TextChange): AnchorSpan {
   }
 
   const start = Math.min(anchor.start, changeStart);
-  const end = anchor.end >= changeEnd ? anchor.end + delta : changeStart + insertedLength;
+  const end =
+    anchor.end >= changeEnd ? anchor.end + delta : changeStart + insertedLength;
   return {
     start,
     end: Math.max(start, end),

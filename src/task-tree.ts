@@ -2,7 +2,9 @@ import * as vscode from "vscode";
 import type { TaskService } from "./task-service.js";
 import type { EditTask } from "./types.js";
 
-export class TaskTreeProvider implements vscode.TreeDataProvider<EditTask>, vscode.Disposable {
+export class TaskTreeProvider
+  implements vscode.TreeDataProvider<EditTask>, vscode.Disposable
+{
   private readonly emitter = new vscode.EventEmitter<EditTask | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
   private readonly subscription: vscode.Disposable;
@@ -16,7 +18,10 @@ export class TaskTreeProvider implements vscode.TreeDataProvider<EditTask>, vsco
   }
 
   getTreeItem(task: EditTask): vscode.TreeItem {
-    const item = new vscode.TreeItem(task.title, vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(
+      task.title,
+      vscode.TreeItemCollapsibleState.None,
+    );
     item.id = task.id;
     item.description = task.taskState;
     item.tooltip = new vscode.MarkdownString(

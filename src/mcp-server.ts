@@ -17,7 +17,8 @@ const server = new McpServer({ name: "anchor-agent", version: "0.1.0" });
 server.registerTool(
   "anchor.list_tasks",
   {
-    description: "List anchored edit tasks exposed by the active VS Code window.",
+    description:
+      "List anchored edit tasks exposed by the active VS Code window.",
     annotations: { readOnlyHint: true },
   },
   async () => toolCall("/v1/tasks"),
@@ -26,7 +27,8 @@ server.registerTool(
 server.registerTool(
   "anchor.get_task",
   {
-    description: "Get one anchored local-edit task. The full document is intentionally omitted.",
+    description:
+      "Get one anchored local-edit task. The full document is intentionally omitted.",
     inputSchema: { taskId: z.string().min(1) },
     annotations: { readOnlyHint: true },
   },
@@ -62,7 +64,8 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  async (input) => toolCall("/v1/search", { method: "POST", body: JSON.stringify(input) }),
+  async (input) =>
+    toolCall("/v1/search", { method: "POST", body: JSON.stringify(input) }),
 );
 
 server.registerTool(
@@ -86,7 +89,8 @@ server.registerTool(
 server.registerTool(
   "anchor.submit_revision",
   {
-    description: "Submit an immutable candidate replacement. This never edits the document.",
+    description:
+      "Submit an immutable candidate replacement. This never edits the document.",
     inputSchema: {
       taskId: z.string().min(1),
       parentRevisionId: z.string().optional(),
@@ -139,7 +143,10 @@ async function toolCall(path: string, init: RequestInit = {}) {
     return { content: [{ type: "text" as const, text }] };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { isError: true, content: [{ type: "text" as const, text: message }] };
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: message }],
+    };
   }
 }
 
@@ -148,13 +155,18 @@ async function loadDescriptor(): Promise<ConnectionDescriptor> {
   try {
     value = JSON.parse(await readFile(descriptorPath, "utf8"));
   } catch {
-    throw new Error("No active Anchor Agent extension was found. Open the VS Code workspace first.");
+    throw new Error(
+      "No active Anchor Agent extension was found. Open the VS Code workspace first.",
+    );
   }
   if (!value || typeof value !== "object") {
     throw new Error("The Anchor Agent connection descriptor is invalid.");
   }
   const descriptor = value as Record<string, unknown>;
-  if (typeof descriptor.endpoint !== "string" || typeof descriptor.token !== "string") {
+  if (
+    typeof descriptor.endpoint !== "string" ||
+    typeof descriptor.token !== "string"
+  ) {
     throw new Error("The Anchor Agent connection descriptor is incomplete.");
   }
   return { endpoint: descriptor.endpoint, token: descriptor.token };
@@ -166,7 +178,8 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
