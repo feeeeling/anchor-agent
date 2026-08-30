@@ -20,9 +20,19 @@ export type TaskState =
   | "orphaned"
   | "archived";
 
+export interface TaskInstruction {
+  id: string;
+  text: string;
+  parentRevisionId?: string;
+  status: "pending" | "completed";
+  revisionId?: string;
+  createdAt: number;
+}
+
 export interface Revision {
   id: string;
   parentRevisionId?: string;
+  instructionId?: string;
   instruction?: string;
   replacement: string;
   summary?: string;
@@ -56,6 +66,7 @@ export interface EditTask {
   sourceSessionId?: string;
   sourceNodeId?: string;
   branchId: string;
+  instructions: TaskInstruction[];
   revisions: Revision[];
   activeRevisionId?: string;
   progress?: TaskProgress;

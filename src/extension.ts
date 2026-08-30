@@ -1,15 +1,18 @@
 import * as vscode from "vscode";
 import { BridgeServer } from "./bridge-server.js";
+import { AnchorCodeLensProvider } from "./code-lenses.js";
 import { AnchorDecorations } from "./decorations.js";
 import { DIFF_SCHEME, DiffContentProvider } from "./diff-content.js";
 import { TaskService } from "./task-service.js";
 import { TaskTreeProvider } from "./task-tree.js";
+import { threeWayMerge } from "./three-way-merge.js";
 
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
   const tasks = new TaskService(context.workspaceState);
   const tree = new TaskTreeProvider(tasks);
+  const codeLenses = new AnchorCodeLensProvider(tasks);
   const decorations = new AnchorDecorations(tasks);
   const bridge = new BridgeServer(tasks);
   const diffProvider = new DiffContentProvider(tasks);
@@ -17,9 +20,14 @@ export async function activate(
   context.subscriptions.push(
     tasks,
     tree,
+    codeLenses,
     decorations,
     bridge,
     vscode.window.registerTreeDataProvider("anchorAgent.tasks", tree),
+    vscode.languages.registerCodeLensProvider(
+      [{ scheme: "file" }, { scheme: "untitled" }],
+      codeLenses,
+    ),
     vscode.workspace.registerTextDocumentContentProvider(
       DIFF_SCHEME,
       diffProvider,
@@ -44,6 +52,10 @@ export async function activate(
     vscode.commands.registerCommand(
       "anchorAgent.acceptTask",
       (value?: unknown) => acceptTask(tasks, value),
+    ),
+    vscode.commands.registerCommand(
+      "anchorAgent.continueTask",
+      (value?: unknown) => continueTask(tasks, value),
     ),
     vscode.commands.registerCommand(
       "anchorAgent.cancelTask",
@@ -141,11 +153,40 @@ async function reviewTask(tasks: TaskService, value?: unknown): Promise<void> {
   const action = await vscode.window.showInformationMessage(
     revision.summary ?? "Candidate ready for review.",
     "Accept",
+    "Continue refining",
     "Keep reviewing",
   );
   if (action === "Accept") {
     await acceptTask(tasks, task.id);
+  } else if (action === "Continue refining") {
+    await continueTask(tasks, task.id);
   }
+}
+
+async function continueTask(
+  tasks: TaskService,
+  value?: unknown,
+): Promise<void> {
+  const taskId = taskIdFrom(value);
+  if (!taskId || !tasks.get(taskId)) {
+    void vscode.window.showErrorMessage(
+      "Select an existing Anchor Agent task first.",
+    );
+    return;
+  }
+  const instruction = await vscode.window.showInputBox({
+    title: "Continue refining candidate",
+    prompt: "This instruction stays on the task's isolated logical branch.",
+    placeHolder: "Describe what should change in the next candidate",
+    ignoreFocusOut: true,
+  });
+  if (!instruction?.trim()) {
+    return;
+  }
+  await tasks.continueTask(taskId, instruction.trim());
+  void vscode.window.showInformationMessage(
+    "Follow-up instruction queued for the connected agent.",
+  );
 }
 
 async function acceptTask(tasks: TaskService, value?: unknown): Promise<void> {
@@ -170,18 +211,25 @@ async function acceptTask(tasks: TaskService, value?: unknown): Promise<void> {
   const end = document.positionAt(task.currentEnd);
   const range = new vscode.Range(start, end);
   const currentText = document.getText(range);
-  if (
-    currentText !== task.baseText ||
-    task.anchorState === "modified" ||
-    task.anchorState === "orphaned"
-  ) {
-    await tasks.setState(task.id, "conflicted");
-    void vscode.window.showWarningMessage(
-      "The anchored text changed after this task was created. Direct replacement was blocked.",
-    );
+  const checkedVersion = document.version;
+  if (currentText !== task.baseText || task.anchorState === "orphaned") {
+    await handleChangedAnchor({
+      tasks,
+      taskId: task.id,
+      document,
+      currentText,
+      remoteText: revision.replacement,
+    });
     return;
   }
   await tasks.setState(task.id, "applying");
+  if (document.version !== checkedVersion || document.getText(range) !== task.baseText) {
+    await tasks.setState(task.id, "conflicted");
+    void vscode.window.showWarningMessage(
+      "The document changed while applying the candidate. No edit was made.",
+    );
+    return;
+  }
   const edit = new vscode.WorkspaceEdit();
   edit.replace(document.uri, range, revision.replacement);
   const applied = await vscode.workspace.applyEdit(edit);
@@ -189,6 +237,80 @@ async function acceptTask(tasks: TaskService, value?: unknown): Promise<void> {
   if (!applied) {
     void vscode.window.showErrorMessage("VS Code rejected the candidate edit.");
   }
+}
+
+interface ChangedAnchorContext {
+  tasks: TaskService;
+  taskId: string;
+  document: vscode.TextDocument;
+  currentText: string;
+  remoteText: string;
+}
+
+async function handleChangedAnchor(context: ChangedAnchorContext): Promise<void> {
+  const { tasks, taskId, document, currentText, remoteText } = context;
+  const task = tasks.get(taskId);
+  if (!task) {
+    return;
+  }
+  await tasks.setState(task.id, "conflicted");
+  const configuredPolicy = vscode.workspace
+    .getConfiguration("anchorAgent")
+    .get<string>("conflictPolicy", "prompt");
+  let action: "merge" | "regenerate" | undefined;
+  if (configuredPolicy === "autoMergeAndReview") {
+    action = "merge";
+  } else if (configuredPolicy === "regenerateOnChange") {
+    action = "regenerate";
+  } else {
+    const selection = await vscode.window.showWarningMessage(
+      "The anchored text changed. Choose how to preserve your local edits.",
+      "Try automatic merge",
+      "Regenerate from current text",
+    );
+    if (selection === "Try automatic merge") {
+      action = "merge";
+    } else if (selection === "Regenerate from current text") {
+      action = "regenerate";
+    }
+  }
+
+  if (action === "regenerate") {
+    const originalInstruction = task.instruction;
+    await tasks.rebaseTask(task.id, document);
+    await tasks.continueTask(
+      task.id,
+      `Regenerate against the updated anchored text. Preserve this intent: ${originalInstruction}`,
+    );
+    void vscode.window.showInformationMessage(
+      "The task was rebased and a new Agent revision was requested.",
+    );
+    return;
+  }
+  if (action !== "merge") {
+    return;
+  }
+
+  const result = threeWayMerge(task.baseText, currentText, remoteText);
+  if (result.conflicted) {
+    void vscode.window.showWarningMessage(
+      "Local and Agent edits overlap. Automatic merge was blocked; regenerate or keep editing manually.",
+    );
+    return;
+  }
+  const parentRevisionId = task.activeRevisionId;
+  await tasks.rebaseTask(task.id, document);
+  const mergedCandidate = {
+    replacement: result.merged,
+    summary: "Merged non-overlapping local and Agent changes; review before applying.",
+    basedOnDocumentVersion: document.version,
+  };
+  if (parentRevisionId) {
+    await tasks.submitRevision(task.id, { ...mergedCandidate, parentRevisionId });
+  } else {
+    await tasks.submitRevision(task.id, mergedCandidate);
+  }
+  await reviewTask(tasks, task.id);
 }
 
 function taskIdFrom(value: unknown): string | undefined {

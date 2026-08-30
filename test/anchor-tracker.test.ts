@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { transformAnchor } from "../src/anchor-tracker.js";
+import { transformAnchor } from "../src/anchor-range.js";
 
 const clean = { start: 10, end: 20, state: "clean" as const };
 

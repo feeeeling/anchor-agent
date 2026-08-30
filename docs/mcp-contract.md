@@ -10,7 +10,7 @@ No input. Returns tasks exposed by the active VS Code window so an agent or adap
 
 Input: `{ taskId: string }`
 
-Returns instruction, selection, language, base document version, task state, and revision metadata. It does not include the full document snapshot.
+Returns selection, language, base document version, task state, revision metadata, and the task's instruction history. Instructions with `status: "pending"` are the turns awaiting an Agent response. It does not include the full document snapshot.
 
 ## `anchor.read_document`
 
@@ -51,6 +51,7 @@ Input:
 {
   "taskId": "task-id",
   "parentRevisionId": "optional-parent",
+  "instructionId": "pending-instruction-being-answered",
   "replacement": "candidate text",
   "summary": "optional explanation",
   "warnings": [],
@@ -58,7 +59,7 @@ Input:
 }
 ```
 
-Creates an immutable candidate. It never edits the document.
+Creates an immutable candidate and completes the referenced pending instruction. If `instructionId` is omitted, the most recent pending instruction is used. It never edits the document.
 
 ## `anchor.request_clarification`
 

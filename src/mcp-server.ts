@@ -94,6 +94,7 @@ server.registerTool(
     inputSchema: {
       taskId: z.string().min(1),
       parentRevisionId: z.string().optional(),
+      instructionId: z.string().optional(),
       instruction: z.string().optional(),
       replacement: z.string(),
       summary: z.string().optional(),

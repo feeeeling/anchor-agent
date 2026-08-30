@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
-import { transformAnchor } from "./anchor-tracker.js";
+import { transformAnchor } from "./anchor-range.js";
 import { sha256 } from "./hash.js";
-import type { EditTask, Revision, TaskProgress, TextChange } from "./types.js";
+import type {
+  EditTask,
+  Revision,
+  TaskInstruction,
+  TaskProgress,
+  TextChange,
+} from "./types.js";
 
 const STORAGE_KEY = "anchorAgent.tasks.v1";
 const TERMINAL_STATES = new Set([
@@ -19,6 +25,17 @@ export class TaskService implements vscode.Disposable {
 
   constructor(private readonly state: vscode.Memento) {
     for (const task of state.get<EditTask[]>(STORAGE_KEY, [])) {
+      if (!Array.isArray((task as { instructions?: unknown }).instructions)) {
+        task.instructions = [
+          {
+            id: randomUUID(),
+            text: task.instruction,
+            status: task.revisions.length > 0 ? "completed" : "pending",
+            ...(task.revisions[0] ? { revisionId: task.revisions[0].id } : {}),
+            createdAt: task.createdAt,
+          },
+        ];
+      }
       this.tasks.set(task.id, task);
     }
   }
@@ -58,6 +75,14 @@ export class TaskService implements vscode.Disposable {
       anchorState: "clean",
       taskState: "created",
       branchId: `branch-${randomUUID()}`,
+      instructions: [
+        {
+          id: randomUUID(),
+          text: instruction,
+          status: "pending",
+          createdAt: now,
+        },
+      ],
       revisions: [],
       createdAt: now,
       updatedAt: now,
@@ -123,6 +148,58 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
+  async rebaseTask(
+    taskId: string,
+    document: vscode.TextDocument,
+  ): Promise<EditTask> {
+    const task = this.require(taskId);
+    const range = new vscode.Range(
+      document.positionAt(task.currentStart),
+      document.positionAt(task.currentEnd),
+    );
+    const currentText = document.getText(range);
+    task.baseDocumentVersion = document.version;
+    task.baseStart = task.currentStart;
+    task.baseEnd = task.currentEnd;
+    task.baseText = currentText;
+    task.baseTextHash = sha256(currentText);
+    task.documentSnapshot = document.getText();
+    task.anchorState = currentText.length === 0 ? "orphaned" : "clean";
+    task.taskState = currentText.length === 0 ? "orphaned" : "created";
+    delete task.progress;
+    delete task.clarification;
+    task.updatedAt = Date.now();
+    await this.changed();
+    return task;
+  }
+
+  async continueTask(
+    taskId: string,
+    instruction: string,
+  ): Promise<TaskInstruction> {
+    const task = this.require(taskId);
+    const pending: TaskInstruction = {
+      id: randomUUID(),
+      text: instruction,
+      status: "pending",
+      createdAt: Date.now(),
+      ...(task.activeRevisionId
+        ? { parentRevisionId: task.activeRevisionId }
+        : {}),
+    };
+    task.instructions.push(pending);
+    task.instruction = instruction;
+    delete task.progress;
+    delete task.clarification;
+    task.taskState =
+      task.anchorState === "modified" || task.anchorState === "orphaned"
+        ? "conflicted"
+        : "created";
+    task.updatedAt = Date.now();
+    await this.changed();
+    return pending;
+  }
+
   async submitRevision(
     taskId: string,
     candidate: Omit<Revision, "id" | "createdAt" | "warnings"> & {
@@ -130,6 +207,16 @@ export class TaskService implements vscode.Disposable {
     },
   ): Promise<Revision> {
     const task = this.require(taskId);
+    const pendingInstruction = candidate.instructionId
+      ? task.instructions.find((item) => item.id === candidate.instructionId)
+      : [...task.instructions]
+          .reverse()
+          .find((item) => item.status === "pending");
+    if (candidate.instructionId && !pendingInstruction) {
+      throw new Error(`Unknown instruction: ${candidate.instructionId}`);
+    }
+    const revisionInstruction =
+      candidate.instruction ?? pendingInstruction?.text;
     const revision: Revision = {
       id: randomUUID(),
       replacement: candidate.replacement,
@@ -137,14 +224,21 @@ export class TaskService implements vscode.Disposable {
       createdAt: Date.now(),
       ...(candidate.parentRevisionId
         ? { parentRevisionId: candidate.parentRevisionId }
-        : {}),
-      ...(candidate.instruction ? { instruction: candidate.instruction } : {}),
+        : pendingInstruction?.parentRevisionId
+          ? { parentRevisionId: pendingInstruction.parentRevisionId }
+          : {}),
+      ...(pendingInstruction ? { instructionId: pendingInstruction.id } : {}),
+      ...(revisionInstruction ? { instruction: revisionInstruction } : {}),
       ...(candidate.summary ? { summary: candidate.summary } : {}),
       ...(candidate.basedOnDocumentVersion === undefined
         ? {}
         : { basedOnDocumentVersion: candidate.basedOnDocumentVersion }),
     };
     task.revisions.push(revision);
+    if (pendingInstruction) {
+      pendingInstruction.status = "completed";
+      pendingInstruction.revisionId = revision.id;
+    }
     task.activeRevisionId = revision.id;
     task.progress = {
       stage: "completed",

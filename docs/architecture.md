@@ -5,8 +5,8 @@
 ```text
 VS Code extension
   ├─ TaskService: task/revision lifecycle and persistence
-  ├─ AnchorTracker: offset transformation and overlap detection
-  ├─ EditorController: commands, decorations, review, atomic apply
+  ├─ AnchorRange: offset transformation and overlap detection
+  ├─ EditorController: commands, CodeLens, decorations, review, atomic apply
   ├─ LocalBridge: authenticated loopback HTTP API
   └─ TaskTreeProvider: task status UI
                │
@@ -35,9 +35,13 @@ Insertion exactly at the start is treated as outside/before the anchor; insertio
 
 Acceptance compares current anchored text with `baseText`. A clean equality permits replacement. Any mismatch enters conflict handling, regardless of the stored state, which protects against missed editor events.
 
+Under `regenerateOnChange`, the extension rebases the immutable task snapshot and adds a pending follow-up instruction. Under `autoMergeAndReview`, a token-preserving three-way merge combines non-overlapping Local and Remote edits derived from Base. The merged text becomes a new candidate against the rebased Local text and must still be reviewed; overlapping changes remain conflicted.
+
 ## Stable and current reads
 
 The task-time full document snapshot is immutable and supports reproducible agent reasoning. A current read reflects unsaved editor contents and returns the current document version. Candidate revisions record the version on which they were based.
+
+Each task stores instruction turns separately from candidate revisions. A follow-up instruction references the active revision and remains `pending` until `anchor.submit_revision` links a response, providing the fallback logical branch for hosts without native conversation forks.
 
 ## MCP compatibility
 

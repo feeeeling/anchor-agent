@@ -10,8 +10,8 @@ Early MVP foundation:
 - task persistence and editor decorations;
 - local authenticated bridge API;
 - stdio MCP server exposing read/search/progress/revision tools;
-- explicit review before applying a candidate;
-- conservative conflict detection when the selected text changes.
+- explicit review and follow-up instructions on a task-local logical branch;
+- configurable conflict handling with rebase/regeneration or reviewed three-way merge.
 
 See [`docs/PRD.md`](docs/PRD.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/mcp-contract.md`](docs/mcp-contract.md).
 

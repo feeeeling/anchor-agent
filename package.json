@@ -31,6 +31,10 @@
         "title": "Anchor Agent: Accept Candidate"
       },
       {
+        "command": "anchorAgent.continueTask",
+        "title": "Anchor Agent: Continue Refining Candidate"
+      },
+      {
         "command": "anchorAgent.cancelTask",
         "title": "Anchor Agent: Cancel Task"
       }
@@ -86,6 +90,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "node-diff3": "^3.2.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
