@@ -11,6 +11,28 @@ const bridge = new McpBridgeClient();
 const dispatcherId = `mcp-${randomUUID()}`;
 
 server.registerTool(
+  "anchor.list_connections",
+  {
+    description: "List active Anchor Agent VS Code windows and the currently selected connection.",
+    annotations: { readOnlyHint: true },
+  },
+  async () => localTool(() => bridge.listConnections()),
+);
+
+server.registerTool(
+  "anchor.use_connection",
+  {
+    description: "Select which VS Code window subsequent Anchor Agent tools use.",
+    inputSchema: { connectionId: z.string().min(1) },
+  },
+  async ({ connectionId }) =>
+    localTool(async () => {
+      await bridge.selectConnection(connectionId);
+      return { selected: connectionId };
+    }),
+);
+
+server.registerTool(
   "anchor.list_tasks",
   {
     description:
@@ -147,6 +169,19 @@ server.registerTool(
 
 function toolCall(path: string, init: RequestInit = {}) {
   return bridge.toolResult(path, init);
+}
+
+async function localTool(operation: () => Promise<unknown>) {
+  try {
+    const value = await operation();
+    return { content: [{ type: "text" as const, text: JSON.stringify(value) }] };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: message }],
+    };
+  }
 }
 
 async function main(): Promise<void> {

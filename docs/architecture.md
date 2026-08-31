@@ -6,11 +6,11 @@
 VS Code extension
   ├─ TaskService: task/revision lifecycle and persistence
   ├─ AnchorRange: offset transformation and overlap detection
-  ├─ EditorController: commands, CodeLens, decorations, review, atomic apply
+  ├─ EditorController: multiline prompt, task panel, CodeLens, review, atomic apply
   ├─ LocalBridge: authenticated loopback HTTP API
   └─ TaskTreeProvider: task status UI
                │
-               │ ~/.anchor-agent/connection.json
+               │ ~/.anchor-agent/connections/*.json
                ▼
 stdio MCP bridge
   ├─ discovers the active extension endpoint
@@ -27,7 +27,7 @@ MCP-capable agent host
 
 The extension is the authority for editor state. The MCP bridge has a short-lived bearer token and binds only to `127.0.0.1`. Agents receive read capabilities and a candidate-submission capability, not editor mutation capabilities.
 
-The connection descriptor is user-readable only. A later multi-window version will replace the single active descriptor with a workspace-aware registry.
+Connection descriptors are user-readable only and stored per extension host under `~/.anchor-agent/connections/`. Focused windows update a compatibility pointer, while MCP processes select and cache one live connection by explicit ID, workspace hint, focus, or recency.
 
 ## Anchor model
 
@@ -38,6 +38,10 @@ Insertion exactly at the start is treated as outside/before the anchor; insertio
 Acceptance compares current anchored text with `baseText`. A clean equality permits replacement. Any mismatch enters conflict handling, regardless of the stored state, which protects against missed editor events.
 
 Under `regenerateOnChange`, the extension rebases the immutable task snapshot and adds a pending follow-up instruction. Under `autoMergeAndReview`, a token-preserving three-way merge combines non-overlapping Local and Remote edits derived from Base. The merged text becomes a new candidate against the rebased Local text and must still be reviewed; overlapping changes remain conflicted.
+
+## Editor panels
+
+The initial instruction uses a CSP-restricted Webview textarea. A temporary in-memory anchor follows document changes while this dialog is open, so edits before the selection do not invalidate task creation. The task-details Webview receives state through `postMessage`, renders task values with `textContent`, and exposes review, Diff, accept, retry, cancel, and multiline follow-up actions.
 
 ## Stable and current reads
 

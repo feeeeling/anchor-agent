@@ -2,6 +2,16 @@
 
 The stdio server uses the `anchor.*` namespace. All tools proxy through the active editor extension.
 
+## `anchor.list_connections`
+
+No input. Lists live VS Code extension connections without exposing bearer tokens. The selected entry is marked with `selected: true`.
+
+## `anchor.use_connection`
+
+Input: `{ connectionId: string }`
+
+Pins subsequent tools and automatic dispatch to one VS Code window. Hosts may instead set `ANCHOR_AGENT_WORKSPACE` to a workspace path or URI before starting the stdio server.
+
 ## `anchor.list_tasks`
 
 No input. Returns tasks exposed by the active VS Code window so an agent or adapter can discover newly created work.
@@ -82,3 +92,7 @@ Sampling without tool support receives only the selected Base text and task-loca
 ## Explicit exclusions
 
 The server does not expose write-file, apply-patch, delete, shell, or Git mutation tools.
+
+## Connection discovery
+
+Each VS Code window registers under `~/.anchor-agent/connections/`. Resolution prefers an explicit descriptor, explicit connection selection, workspace hint, focused-window hint, then the newest live connection. The chosen descriptor is cached so a focus change cannot reroute an in-flight task. `connection.json` remains as a compatibility pointer.

@@ -31,6 +31,10 @@
         "title": "Anchor Agent: Accept Candidate"
       },
       {
+        "command": "anchorAgent.openDiff",
+        "title": "Anchor Agent: Open Candidate Diff"
+      },
+      {
         "command": "anchorAgent.continueTask",
         "title": "Anchor Agent: Continue Refining Candidate"
       },

@@ -6,10 +6,11 @@ Anchor Agent is a VS Code extension for asynchronous, selection-scoped AI editin
 
 Early MVP foundation:
 
-- selection task creation and tracked anchors;
-- task persistence and editor decorations;
-- local authenticated bridge API;
-- stdio MCP server exposing claim/read/search/progress/revision tools;
+- multiline task instructions with range tracking while the dialog is open;
+- selection task creation, tracked anchors, and a live task-details panel;
+- task persistence, CodeLens status, and editor decorations;
+- local authenticated bridge API with workspace-aware multi-window routing;
+- stdio MCP server exposing connection/claim/read/search/progress/revision tools;
 - automatic dispatch through MCP Sampling, with read tools when the host supports them;
 - leased retries plus explicit retry for failed Agent dispatches;
 - explicit review and follow-up instructions on a task-local logical branch;
@@ -39,4 +40,4 @@ Run the extension with VS Code's Extension Development Host. Configure an MCP ho
 }
 ```
 
-The bridge discovers the active VS Code extension through `~/.anchor-agent/connection.json`. Call `anchor.list_tasks` to discover a newly created task.
+The bridge discovers live windows through `~/.anchor-agent/connections/`. In multi-window setups, set `ANCHOR_AGENT_WORKSPACE` in the MCP process or use `anchor.list_connections` followed by `anchor.use_connection`. Call `anchor.list_tasks` to discover a newly created task.

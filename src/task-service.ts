@@ -166,7 +166,9 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
-  async claimInstruction(request: ClaimInstructionRequest): Promise<InstructionClaim | undefined> {
+  async claimInstruction(
+    request: ClaimInstructionRequest,
+  ): Promise<InstructionClaim | undefined> {
     const now = Date.now();
     const candidates = [...this.tasks.values()].sort(
       (left, right) => left.createdAt - right.createdAt,
@@ -193,7 +195,8 @@ export class TaskService implements vscode.Disposable {
         }
         instruction.status = "dispatching";
         instruction.dispatcherId = request.dispatcherId;
-        instruction.leaseUntil = now + Math.min(Math.max(request.leaseMs, 5_000), 300_000);
+        instruction.leaseUntil =
+          now + Math.min(Math.max(request.leaseMs, 5_000), 300_000);
         instruction.dispatchAttempts += 1;
         delete instruction.lastError;
         task.taskState = "queued";
@@ -221,18 +224,24 @@ export class TaskService implements vscode.Disposable {
     message: string,
   ): Promise<void> {
     for (const task of this.tasks.values()) {
-      const instruction = task.instructions.find((item) => item.id === instructionId);
+      const instruction = task.instructions.find(
+        (item) => item.id === instructionId,
+      );
       if (!instruction) {
         continue;
       }
-      if (instruction.dispatcherId && instruction.dispatcherId !== dispatcherId) {
+      if (
+        instruction.dispatcherId &&
+        instruction.dispatcherId !== dispatcherId
+      ) {
         throw new Error("Instruction is leased by another dispatcher");
       }
       instruction.lastError = message;
       delete instruction.dispatcherId;
       if (instruction.dispatchAttempts < 3) {
         instruction.status = "dispatching";
-        instruction.leaseUntil = Date.now() + 5_000 * 2 ** instruction.dispatchAttempts;
+        instruction.leaseUntil =
+          Date.now() + 5_000 * 2 ** instruction.dispatchAttempts;
         task.taskState = "queued";
         task.progress = {
           stage: "retrying",
@@ -281,6 +290,9 @@ export class TaskService implements vscode.Disposable {
     instruction: string,
   ): Promise<TaskInstruction> {
     const task = this.require(taskId);
+    if (TERMINAL_STATES.has(task.taskState) || task.taskState === "applying") {
+      throw new Error(`Cannot continue a task in state ${task.taskState}`);
+    }
     const pending: TaskInstruction = {
       id: randomUUID(),
       text: instruction,
@@ -315,7 +327,10 @@ export class TaskService implements vscode.Disposable {
       ? task.instructions.find((item) => item.id === candidate.instructionId)
       : [...task.instructions]
           .reverse()
-          .find((item) => item.status === "pending" || item.status === "dispatching");
+          .find(
+            (item) =>
+              item.status === "pending" || item.status === "dispatching",
+          );
     if (candidate.instructionId && !pendingInstruction) {
       throw new Error(`Unknown instruction: ${candidate.instructionId}`);
     }
@@ -375,7 +390,10 @@ export class TaskService implements vscode.Disposable {
     delete instruction.leaseUntil;
     delete instruction.lastError;
     task.taskState = "created";
-    task.progress = { stage: "queued", message: "Retry queued for a connected Agent" };
+    task.progress = {
+      stage: "queued",
+      message: "Retry queued for a connected Agent",
+    };
     task.updatedAt = Date.now();
     await this.changed();
     return instruction;

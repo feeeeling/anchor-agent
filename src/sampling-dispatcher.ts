@@ -30,7 +30,8 @@ const candidateSchema = z.object({
 const samplingTools: Tool[] = [
   {
     name: "anchor.read_document",
-    description: "Read the immutable task snapshot or the current editor document.",
+    description:
+      "Read the immutable task snapshot or the current editor document.",
     inputSchema: {
       type: "object",
       properties: {
@@ -88,22 +89,31 @@ export class SamplingDispatcher {
     }
   }
 
-  async dispatchNext(supportsTools: boolean): Promise<"dispatched" | "idle" | "disabled"> {
-    const response = await this.bridge.request<ClaimResponse>("/v1/dispatch/claim", {
-      method: "POST",
-      body: JSON.stringify({
-        dispatcherId: this.dispatcherId,
-        leaseMs: 120_000,
-        mode: "auto",
-      }),
-    });
+  async dispatchNext(
+    supportsTools: boolean,
+  ): Promise<"dispatched" | "idle" | "disabled"> {
+    const response = await this.bridge.request<ClaimResponse>(
+      "/v1/dispatch/claim",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          dispatcherId: this.dispatcherId,
+          leaseMs: 120_000,
+          mode: "auto",
+        }),
+      },
+    );
     if (!response.autoDispatch) {
       return "disabled";
     }
     if (!response.claim) {
       return "idle";
     }
-    await this.dispatch(response.claim, supportsTools, response.maxTokens ?? 8_192);
+    await this.dispatch(
+      response.claim,
+      supportsTools,
+      response.maxTokens ?? 8_192,
+    );
     return "dispatched";
   }
 
@@ -117,7 +127,12 @@ export class SamplingDispatcher {
     maxTokens: number,
   ): Promise<void> {
     try {
-      await this.reportProgress(claim.task.id, "sampling", "Agent is generating a candidate", 10);
+      await this.reportProgress(
+        claim.task.id,
+        "sampling",
+        "Agent is generating a candidate",
+        10,
+      );
       const messages: SamplingMessage[] = [
         {
           role: "user",
@@ -128,17 +143,20 @@ export class SamplingDispatcher {
         ? await this.sampleWithTools(messages, maxTokens, claim.task.id)
         : await this.sampleWithoutTools(messages, maxTokens);
       const candidate = parseCandidate(finalText);
-      await this.bridge.request(`/v1/tasks/${encodeURIComponent(claim.task.id)}/revisions`, {
-        method: "POST",
-        body: JSON.stringify({
-          instructionId: claim.instruction.id,
-          parentRevisionId: claim.instruction.parentRevisionId,
-          replacement: candidate.replacement,
-          summary: candidate.summary,
-          warnings: candidate.warnings,
-          basedOnDocumentVersion: claim.task.baseDocumentVersion,
-        }),
-      });
+      await this.bridge.request(
+        `/v1/tasks/${encodeURIComponent(claim.task.id)}/revisions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            instructionId: claim.instruction.id,
+            parentRevisionId: claim.instruction.parentRevisionId,
+            replacement: candidate.replacement,
+            summary: candidate.summary,
+            warnings: candidate.warnings,
+            basedOnDocumentVersion: claim.task.baseDocumentVersion,
+          }),
+        },
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.bridge.request(
@@ -151,7 +169,10 @@ export class SamplingDispatcher {
     }
   }
 
-  private async sampleWithoutTools(messages: SamplingMessage[], maxTokens: number): Promise<string> {
+  private async sampleWithoutTools(
+    messages: SamplingMessage[],
+    maxTokens: number,
+  ): Promise<string> {
     const result = await this.server.server.createMessage({
       messages,
       systemPrompt: systemPrompt(false),
@@ -175,7 +196,9 @@ export class SamplingDispatcher {
         tools: samplingTools,
         toolChoice: { mode: "auto" },
       });
-      const blocks = Array.isArray(result.content) ? result.content : [result.content];
+      const blocks = Array.isArray(result.content)
+        ? result.content
+        : [result.content];
       const toolUses = blocks.filter(isToolUse);
       if (toolUses.length === 0) {
         return textFrom(blocks);
@@ -189,13 +212,20 @@ export class SamplingDispatcher {
     throw new Error("Sampling exceeded the maximum tool-call turns");
   }
 
-  private async executeTool(toolUse: ToolUseContent, taskId: string): Promise<ToolResultContent> {
+  private async executeTool(
+    toolUse: ToolUseContent,
+    taskId: string,
+  ): Promise<ToolResultContent> {
     try {
       const input = { ...toolUse.input, taskId };
       let value: unknown;
       if (toolUse.name === "anchor.read_document") {
         const parsed = z
-          .object({ taskId: z.string(), uri: z.string(), mode: z.enum(["snapshot", "current"]) })
+          .object({
+            taskId: z.string(),
+            uri: z.string(),
+            mode: z.enum(["snapshot", "current"]),
+          })
           .parse(input);
         const query = new URLSearchParams(parsed);
         value = await this.bridge.request(`/v1/documents?${query.toString()}`);
@@ -237,10 +267,13 @@ export class SamplingDispatcher {
     message: string,
     percentage: number,
   ): Promise<void> {
-    await this.bridge.request(`/v1/tasks/${encodeURIComponent(taskId)}/progress`, {
-      method: "POST",
-      body: JSON.stringify({ stage, message, percentage }),
-    });
+    await this.bridge.request(
+      `/v1/tasks/${encodeURIComponent(taskId)}/progress`,
+      {
+        method: "POST",
+        body: JSON.stringify({ stage, message, percentage }),
+      },
+    );
   }
 
   private async waitForClientCapabilities() {
@@ -256,7 +289,9 @@ export class SamplingDispatcher {
 
 function buildPrompt(claim: DispatchClaim, supportsTools: boolean): string {
   const previous = claim.instruction.parentRevisionId
-    ? claim.task.revisions.find((revision) => revision.id === claim.instruction.parentRevisionId)
+    ? claim.task.revisions.find(
+        (revision) => revision.id === claim.instruction.parentRevisionId,
+      )
     : undefined;
   return [
     `Task ID: ${claim.task.id}`,
@@ -268,7 +303,9 @@ function buildPrompt(claim: DispatchClaim, supportsTools: boolean): string {
     claim.task.baseText,
     "</selection>",
     "",
-    previous ? `Previous candidate:\n<candidate>\n${previous.replacement}\n</candidate>\n` : "",
+    previous
+      ? `Previous candidate:\n<candidate>\n${previous.replacement}\n</candidate>\n`
+      : "",
     `Instruction: ${claim.instruction.text}`,
     supportsTools
       ? "Read additional document or workspace context only when it is useful."
@@ -281,12 +318,17 @@ function systemPrompt(supportsTools: boolean): string {
   return [
     "You perform one local text edit. Never attempt to write files or return a patch for other ranges.",
     "Preserve syntax, formatting, commands, references, and surrounding-language conventions unless instructed otherwise.",
-    supportsTools ? "You may use only the provided read-only tools." : "Use only the supplied selection.",
+    supportsTools
+      ? "You may use only the provided read-only tools."
+      : "Use only the supplied selection.",
   ].join(" ");
 }
 
 function parseCandidate(value: string): z.infer<typeof candidateSchema> {
-  const withoutFence = value.trim().replace(/^```(?:json)?\s*/u, "").replace(/\s*```$/u, "");
+  const withoutFence = value
+    .trim()
+    .replace(/^```(?:json)?\s*/u, "")
+    .replace(/\s*```$/u, "");
   const start = withoutFence.indexOf("{");
   const end = withoutFence.lastIndexOf("}");
   if (start < 0 || end < start) {
@@ -301,10 +343,17 @@ function parseCandidate(value: string): z.infer<typeof candidateSchema> {
   }
 }
 
-function textFrom(content: SamplingMessageContentBlock | SamplingMessageContentBlock[]): string {
+function textFrom(
+  content: SamplingMessageContentBlock | SamplingMessageContentBlock[],
+): string {
   const blocks = Array.isArray(content) ? content : [content];
   const text = blocks
-    .filter((block): block is Extract<SamplingMessageContentBlock, { type: "text" }> => block.type === "text")
+    .filter(
+      (
+        block,
+      ): block is Extract<SamplingMessageContentBlock, { type: "text" }> =>
+        block.type === "text",
+    )
     .map((block) => block.text)
     .join("\n")
     .trim();
@@ -314,7 +363,9 @@ function textFrom(content: SamplingMessageContentBlock | SamplingMessageContentB
   return text;
 }
 
-function isToolUse(block: SamplingMessageContentBlock): block is ToolUseContent {
+function isToolUse(
+  block: SamplingMessageContentBlock,
+): block is ToolUseContent {
   return block.type === "tool_use";
 }
 

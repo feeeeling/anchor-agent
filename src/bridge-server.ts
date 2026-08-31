@@ -1,31 +1,21 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
 import * as vscode from "vscode";
+import { ExtensionConnectionRegistry } from "./extension-connection-registry.js";
 import type { ClaimInstructionRequest, TaskService } from "./task-service.js";
 import type { Revision, TaskProgress } from "./types.js";
 
-interface ConnectionDescriptor {
-  endpoint: string;
-  token: string;
-  pid: number;
-  workspaceFolders: string[];
-  updatedAt: number;
-}
-
-const DESCRIPTOR_PATH = join(homedir(), ".anchor-agent", "connection.json");
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_DOCUMENT_BYTES = 2_000_000;
 
 export class BridgeServer implements vscode.Disposable {
   private readonly token = randomBytes(32).toString("hex");
+  private readonly registry = new ExtensionConnectionRegistry();
   private server: Server | undefined;
   private endpoint: string | undefined;
 
@@ -44,7 +34,7 @@ export class BridgeServer implements vscode.Disposable {
       throw new Error("Could not determine Anchor Agent bridge address");
     }
     this.endpoint = `http://127.0.0.1:${address.port}`;
-    const descriptor: ConnectionDescriptor = {
+    await this.registry.start({
       endpoint: this.endpoint,
       token: this.token,
       pid: process.pid,
@@ -52,18 +42,13 @@ export class BridgeServer implements vscode.Disposable {
         vscode.workspace.workspaceFolders?.map((folder) =>
           folder.uri.toString(),
         ) ?? [],
-      updatedAt: Date.now(),
-    };
-    await mkdir(dirname(DESCRIPTOR_PATH), { recursive: true, mode: 0o700 });
-    await writeFile(DESCRIPTOR_PATH, JSON.stringify(descriptor, null, 2), {
-      mode: 0o600,
+      ...(vscode.workspace.name ? { workspaceName: vscode.workspace.name } : {}),
     });
-    await chmod(DESCRIPTOR_PATH, 0o600);
   }
 
   dispose(): void {
     this.server?.close();
-    void this.removeOwnedDescriptor();
+    this.registry.dispose();
   }
 
   private async handle(
@@ -86,9 +71,8 @@ export class BridgeServer implements vscode.Disposable {
       const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(
         url.pathname,
       );
-      const dispatchFailureMatch = /^\/v1\/dispatch\/instructions\/([^/]+)\/fail$/.exec(
-        url.pathname,
-      );
+      const dispatchFailureMatch =
+        /^\/v1\/dispatch\/instructions\/([^/]+)\/fail$/.exec(url.pathname);
 
       if (request.method === "POST" && url.pathname === "/v1/dispatch/claim") {
         const body = await this.readBody(request);
@@ -103,7 +87,9 @@ export class BridgeServer implements vscode.Disposable {
           dispatcherId: body.dispatcherId,
           leaseMs: body.leaseMs,
           ...(body.taskId ? { taskId: body.taskId } : {}),
-          ...(body.sourceSessionId ? { sourceSessionId: body.sourceSessionId } : {}),
+          ...(body.sourceSessionId
+            ? { sourceSessionId: body.sourceSessionId }
+            : {}),
           ...(body.sourceNodeId ? { sourceNodeId: body.sourceNodeId } : {}),
         };
         const claim = await this.tasks.claimInstruction(claimRequest);
@@ -284,7 +270,9 @@ export class BridgeServer implements vscode.Disposable {
   }
 
   private autoDispatchAllowed(): boolean {
-    return vscode.workspace.getConfiguration("anchorAgent").get("autoDispatch", true);
+    return vscode.workspace
+      .getConfiguration("anchorAgent")
+      .get("autoDispatch", true);
   }
 
   private samplingMaxTokens(): number {
@@ -330,18 +318,6 @@ export class BridgeServer implements vscode.Disposable {
     response.end(JSON.stringify(body));
   }
 
-  private async removeOwnedDescriptor(): Promise<void> {
-    try {
-      const descriptor = JSON.parse(
-        await readFile(DESCRIPTOR_PATH, "utf8"),
-      ) as ConnectionDescriptor;
-      if (descriptor.token === this.token) {
-        await unlink(DESCRIPTOR_PATH);
-      }
-    } catch {
-      // Another window may own the descriptor, or it may already be gone.
-    }
-  }
 }
 
 function isDispatchClaimRequest(value: unknown): value is {
@@ -371,7 +347,10 @@ function isDispatchFailureRequest(value: unknown): value is {
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  return typeof candidate.dispatcherId === "string" && typeof candidate.message === "string";
+  return (
+    typeof candidate.dispatcherId === "string" &&
+    typeof candidate.message === "string"
+  );
 }
 
 function isSearchRequest(value: unknown): value is {

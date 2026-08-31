@@ -88,7 +88,11 @@ describe("SamplingDispatcher", () => {
         return {};
       }
       if (path.startsWith("/v1/documents?")) {
-        return { uri: claim.task.documentUri, version: 3, content: "Full document" };
+        return {
+          uri: claim.task.documentUri,
+          version: 3,
+          content: "Full document",
+        };
       }
       throw new Error(`Unexpected bridge path: ${path}`);
     });

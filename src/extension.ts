@@ -1,11 +1,15 @@
 import * as vscode from "vscode";
+import { transformAnchor } from "./anchor-range.js";
 import { BridgeServer } from "./bridge-server.js";
 import { AnchorCodeLensProvider } from "./code-lenses.js";
 import { AnchorDecorations } from "./decorations.js";
 import { DIFF_SCHEME, DiffContentProvider } from "./diff-content.js";
+import { promptForInstruction } from "./instruction-panel.js";
+import { TaskDetailsPanelManager } from "./task-details-panel.js";
 import { TaskService } from "./task-service.js";
 import { TaskTreeProvider } from "./task-tree.js";
 import { threeWayMerge } from "./three-way-merge.js";
+import type { AnchorSpan } from "./types.js";
 
 export async function activate(
   context: vscode.ExtensionContext,
@@ -15,6 +19,7 @@ export async function activate(
   const codeLenses = new AnchorCodeLensProvider(tasks);
   const decorations = new AnchorDecorations(tasks);
   const bridge = new BridgeServer(tasks);
+  const details = new TaskDetailsPanelManager(tasks);
   const diffProvider = new DiffContentProvider(tasks);
 
   context.subscriptions.push(
@@ -23,6 +28,7 @@ export async function activate(
     codeLenses,
     decorations,
     bridge,
+    details,
     vscode.window.registerTreeDataProvider("anchorAgent.tasks", tree),
     vscode.languages.registerCodeLensProvider(
       [{ scheme: "file" }, { scheme: "untitled" }],
@@ -43,11 +49,15 @@ export async function activate(
       );
     }),
     vscode.commands.registerCommand("anchorAgent.createTask", () =>
-      createTask(tasks),
+      createTask(tasks, details),
     ),
     vscode.commands.registerCommand(
       "anchorAgent.reviewTask",
-      (value?: unknown) => reviewTask(tasks, value),
+      (value?: unknown) => showTaskDetails(details, value),
+    ),
+    vscode.commands.registerCommand(
+      "anchorAgent.openDiff",
+      (value?: unknown) => openDiffTask(tasks, value),
     ),
     vscode.commands.registerCommand(
       "anchorAgent.acceptTask",
@@ -82,7 +92,10 @@ export async function activate(
   }
 }
 
-async function createTask(tasks: TaskService): Promise<void> {
+async function createTask(
+  tasks: TaskService,
+  details: TaskDetailsPanelManager,
+): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.selection.isEmpty) {
     void vscode.window.showInformationMessage(
@@ -90,21 +103,48 @@ async function createTask(tasks: TaskService): Promise<void> {
     );
     return;
   }
-  const instruction = await vscode.window.showInputBox({
-    title: "Rewrite selection with Anchor Agent",
-    prompt:
-      "The initial agent context contains this selection only; it may read the file through MCP.",
-    placeHolder: "Describe the desired change",
-    ignoreFocusOut: true,
+  const documentUri = editor.document.uri;
+  let trackedRange: AnchorSpan = {
+    start: editor.document.offsetAt(editor.selection.start),
+    end: editor.document.offsetAt(editor.selection.end),
+    state: "clean",
+  };
+  const selectedText = editor.document.getText(editor.selection);
+  const subscription = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (event.document.uri.toString() !== documentUri.toString()) {
+      return;
+    }
+    trackedRange = transformAnchor(
+      trackedRange,
+      event.contentChanges.map((change) => ({
+        rangeOffset: change.rangeOffset,
+        rangeLength: change.rangeLength,
+        text: change.text,
+      })),
+    );
   });
-  if (!instruction?.trim()) {
+  const instruction = await promptForInstruction(selectedText).finally(() =>
+    subscription.dispose(),
+  );
+  if (!instruction) {
     return;
   }
-  const task = await tasks.create(
-    editor.document,
-    editor.selection,
-    instruction.trim(),
+  const document = await vscode.workspace.openTextDocument(documentUri);
+  if (
+    trackedRange.state === "orphaned" ||
+    trackedRange.end <= trackedRange.start
+  ) {
+    void vscode.window.showWarningMessage(
+      "The selected text was removed while the instruction was open. Select it again.",
+    );
+    return;
+  }
+  const selection = new vscode.Selection(
+    document.positionAt(trackedRange.start),
+    document.positionAt(trackedRange.end),
   );
+  const task = await tasks.create(document, selection, instruction);
+  details.show(task.id);
   const action = await vscode.window.showInformationMessage(
     `Anchor task created: ${task.title}`,
     "Copy task ID",
@@ -114,30 +154,21 @@ async function createTask(tasks: TaskService): Promise<void> {
   }
 }
 
-async function reviewTask(tasks: TaskService, value?: unknown): Promise<void> {
+function showTaskDetails(details: TaskDetailsPanelManager, value?: unknown): void {
   const taskId = taskIdFrom(value);
-  if (!taskId) {
-    return;
+  if (taskId) {
+    details.show(taskId);
   }
-  const task = tasks.get(taskId);
-  if (!task) {
-    void vscode.window.showErrorMessage("Anchor task no longer exists.");
-    return;
-  }
-  if (task.revisions.length === 0) {
-    const action = await vscode.window.showInformationMessage(
-      `${task.taskState}: ${task.progress?.message ?? "No candidate revision has been submitted yet."}`,
-      ...(task.taskState === "failed" ? ["Retry"] : []),
-    );
-    if (action === "Retry") {
-      await retryTask(tasks, task.id);
-    }
-    return;
-  }
+}
+
+async function openDiffTask(tasks: TaskService, value?: unknown): Promise<void> {
+  const taskId = taskIdFrom(value);
+  const task = taskId ? tasks.get(taskId) : undefined;
   const revision =
-    task.revisions.find((item) => item.id === task.activeRevisionId) ??
-    task.revisions.at(-1);
-  if (!revision) {
+    task?.revisions.find((item) => item.id === task.activeRevisionId) ??
+    task?.revisions.at(-1);
+  if (!task || !revision) {
+    void vscode.window.showInformationMessage("No candidate revision is available yet.");
     return;
   }
   const baseUri = vscode.Uri.from({
@@ -158,17 +189,6 @@ async function reviewTask(tasks: TaskService, value?: unknown): Promise<void> {
     `Anchor Agent: ${task.title}`,
     { preview: true },
   );
-  const action = await vscode.window.showInformationMessage(
-    revision.summary ?? "Candidate ready for review.",
-    "Accept",
-    "Continue refining",
-    "Keep reviewing",
-  );
-  if (action === "Accept") {
-    await acceptTask(tasks, task.id);
-  } else if (action === "Continue refining") {
-    await continueTask(tasks, task.id);
-  }
 }
 
 async function retryTask(tasks: TaskService, value?: unknown): Promise<void> {
@@ -341,7 +361,7 @@ async function handleChangedAnchor(
   } else {
     await tasks.submitRevision(task.id, mergedCandidate);
   }
-  await reviewTask(tasks, task.id);
+  await vscode.commands.executeCommand("anchorAgent.reviewTask", task.id);
 }
 
 function taskIdFrom(value: unknown): string | undefined {

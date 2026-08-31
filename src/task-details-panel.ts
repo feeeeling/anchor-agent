@@ -1,0 +1,262 @@
+import { randomBytes } from "node:crypto";
+import * as vscode from "vscode";
+import type { TaskService } from "./task-service.js";
+import type { EditTask } from "./types.js";
+
+const TERMINAL_STATES = new Set(["applied", "cancelled", "rejected", "archived"]);
+
+interface PanelMessage {
+  type: "ready" | "accept" | "openDiff" | "continue" | "retry" | "cancel";
+  instruction?: string;
+}
+
+export class TaskDetailsPanelManager implements vscode.Disposable {
+  private readonly panels = new Map<string, vscode.WebviewPanel>();
+  private readonly subscription: vscode.Disposable;
+
+  constructor(private readonly tasks: TaskService) {
+    this.subscription = tasks.onDidChange(() => this.refresh());
+  }
+
+  show(taskId: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      void vscode.window.showErrorMessage("Anchor task no longer exists.");
+      return;
+    }
+    const existing = this.panels.get(taskId);
+    if (existing) {
+      existing.reveal(vscode.ViewColumn.Beside, false);
+      this.update(existing, task);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      "anchorAgent.taskDetails",
+      `Anchor Agent: ${task.title}`,
+      vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+    const nonce = randomBytes(16).toString("base64url");
+    panel.webview.html = renderHtml(nonce);
+    this.panels.set(taskId, panel);
+    panel.onDidDispose(() => this.panels.delete(taskId));
+    panel.webview.onDidReceiveMessage((value: unknown) => {
+      void this.handleMessage(taskId, value);
+    });
+    this.update(panel, task);
+  }
+
+  dispose(): void {
+    this.subscription.dispose();
+    for (const panel of this.panels.values()) {
+      panel.dispose();
+    }
+    this.panels.clear();
+  }
+
+  private refresh(): void {
+    for (const [taskId, panel] of this.panels) {
+      const task = this.tasks.get(taskId);
+      if (task) {
+        this.update(panel, task);
+      } else {
+        panel.dispose();
+      }
+    }
+  }
+
+  private update(panel: vscode.WebviewPanel, task: EditTask): void {
+    const revision =
+      task.revisions.find((item) => item.id === task.activeRevisionId) ??
+      task.revisions.at(-1);
+    void panel.webview.postMessage({
+      type: "task",
+      task: {
+        id: task.id,
+        title: task.title,
+        taskState: task.taskState,
+        anchorState: task.anchorState,
+        instruction: task.instruction,
+        progress: task.progress?.message ?? "",
+        baseText: task.baseText,
+        candidate: revision?.replacement ?? "",
+        summary: revision?.summary ?? "",
+        warnings: revision?.warnings ?? [],
+        revisionCount: task.revisions.length,
+        instructionCount: task.instructions.length,
+        hasCandidate: revision !== undefined,
+        canAccept: revision !== undefined && !TERMINAL_STATES.has(task.taskState),
+        canContinue: !TERMINAL_STATES.has(task.taskState) && task.taskState !== "applying",
+        canRetry: task.instructions.some((item) => item.status === "failed"),
+      },
+    });
+  }
+
+  private async handleMessage(taskId: string, value: unknown): Promise<void> {
+    const message = decodeMessage(value);
+    if (!message) {
+      return;
+    }
+    if (message.type === "ready") {
+      const panel = this.panels.get(taskId);
+      const task = this.tasks.get(taskId);
+      if (panel && task) {
+        this.update(panel, task);
+      }
+      return;
+    }
+    if (message.type === "accept") {
+      await vscode.commands.executeCommand("anchorAgent.acceptTask", taskId);
+      return;
+    }
+    if (message.type === "openDiff") {
+      await vscode.commands.executeCommand("anchorAgent.openDiff", taskId);
+      return;
+    }
+    if (message.type === "cancel") {
+      const task = this.tasks.get(taskId);
+      if (task && !TERMINAL_STATES.has(task.taskState)) {
+        await this.tasks.setState(taskId, "cancelled");
+      }
+      return;
+    }
+    if (message.type === "retry") {
+      try {
+        await this.tasks.retryTask(taskId);
+      } catch (error) {
+        await this.showError(taskId, error);
+      }
+      return;
+    }
+    const instruction = message.instruction?.trim() ?? "";
+    if (!instruction) {
+      await this.post(taskId, { type: "validation", message: "Enter a follow-up instruction." });
+      return;
+    }
+    try {
+      await this.tasks.continueTask(taskId, instruction);
+      await this.post(taskId, { type: "continued" });
+    } catch (error) {
+      await this.showError(taskId, error);
+    }
+  }
+
+  private async showError(taskId: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    await this.post(taskId, { type: "validation", message });
+  }
+
+  private async post(taskId: string, message: unknown): Promise<void> {
+    await this.panels.get(taskId)?.webview.postMessage(message);
+  }
+}
+
+function decodeMessage(value: unknown): PanelMessage | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  const supported = ["ready", "accept", "openDiff", "continue", "retry", "cancel"];
+  if (typeof candidate.type !== "string" || !supported.includes(candidate.type)) {
+    return undefined;
+  }
+  if (candidate.instruction !== undefined && typeof candidate.instruction !== "string") {
+    return undefined;
+  }
+  return {
+    type: candidate.type as PanelMessage["type"],
+    ...(typeof candidate.instruction === "string"
+      ? { instruction: candidate.instruction }
+      : {}),
+  };
+}
+
+function renderHtml(nonce: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <style nonce="${nonce}">
+    body { box-sizing: border-box; margin: 0 auto; max-width: 1000px; padding: 20px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.5 var(--vscode-font-family); }
+    header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 1.3rem; }
+    #status { white-space: nowrap; padding: 3px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 999px; }
+    .muted { color: var(--vscode-descriptionForeground); }
+    .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    section { margin-top: 16px; }
+    pre { min-height: 100px; max-height: 35vh; overflow: auto; margin: 6px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-panel-border); }
+    textarea { box-sizing: border-box; width: 100%; min-height: 100px; resize: vertical; padding: 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); font: inherit; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    button { padding: 6px 12px; border: 1px solid transparent; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
+    button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+    button:disabled { cursor: default; opacity: .5; }
+    #warnings, #error { color: var(--vscode-errorForeground); }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header><div><h1 id="title">Anchor Agent task</h1><div id="meta" class="muted"></div></div><span id="status">loading</span></header>
+  <p id="progress" class="muted"></p>
+  <section><strong>Instruction</strong><div id="instruction"></div><div id="summary" class="muted"></div><div id="warnings"></div></section>
+  <div class="grid">
+    <section><strong>Base</strong><pre id="base"></pre></section>
+    <section><strong>Candidate</strong><pre id="candidate"></pre></section>
+  </div>
+  <div class="actions">
+    <button id="accept">Accept candidate</button>
+    <button id="diff" class="secondary">Open Diff</button>
+    <button id="retry" class="secondary">Retry</button>
+    <button id="cancel" class="secondary">Cancel task</button>
+  </div>
+  <section>
+    <strong>Continue refining</strong>
+    <textarea id="followup" placeholder="Describe what to change in the next candidate."></textarea>
+    <div id="error" role="alert" aria-live="polite"></div>
+    <div class="actions"><button id="continue">Send follow-up</button></div>
+  </section>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    const byId = (id) => document.getElementById(id);
+    let currentTask;
+    const send = (type, extra = {}) => vscode.postMessage({ type, ...extra });
+    byId('accept').addEventListener('click', () => send('accept'));
+    byId('diff').addEventListener('click', () => send('openDiff'));
+    byId('retry').addEventListener('click', () => send('retry'));
+    byId('cancel').addEventListener('click', () => send('cancel'));
+    byId('continue').addEventListener('click', () => send('continue', { instruction: byId('followup').value }));
+    byId('followup').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        send('continue', { instruction: byId('followup').value });
+      }
+    });
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (message?.type === 'validation') { byId('error').textContent = message.message; return; }
+      if (message?.type === 'continued') { byId('followup').value = ''; byId('error').textContent = ''; return; }
+      if (message?.type !== 'task') return;
+      currentTask = message.task;
+      const task = currentTask;
+      byId('title').textContent = task.title;
+      byId('status').textContent = task.taskState + ' / ' + task.anchorState;
+      byId('meta').textContent = task.revisionCount + ' revisions · ' + task.instructionCount + ' instructions';
+      byId('progress').textContent = task.progress;
+      byId('instruction').textContent = task.instruction;
+      byId('summary').textContent = task.summary;
+      byId('warnings').textContent = task.warnings.join('\n');
+      byId('base').textContent = task.baseText;
+      byId('candidate').textContent = task.candidate || 'No candidate yet.';
+      byId('accept').disabled = !task.canAccept;
+      byId('diff').disabled = !task.hasCandidate;
+      byId('retry').disabled = !task.canRetry;
+      byId('cancel').disabled = !task.canContinue;
+      byId('continue').disabled = !task.canContinue;
+      byId('followup').disabled = !task.canContinue;
+    });
+    send('ready');
+  </script>
+</body>
+</html>`;
+}
