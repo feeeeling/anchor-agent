@@ -4,7 +4,9 @@ import type { EditTask } from "./types.js";
 
 const HIDDEN_STATES = new Set(["applied", "rejected", "cancelled", "archived"]);
 
-export class AnchorCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
+export class AnchorCodeLensProvider
+  implements vscode.CodeLensProvider, vscode.Disposable
+{
   private readonly emitter = new vscode.EventEmitter<void>();
   readonly onDidChangeCodeLenses = this.emitter.event;
   private readonly subscription: vscode.Disposable;
@@ -23,11 +25,17 @@ export class AnchorCodeLensProvider implements vscode.CodeLensProvider, vscode.D
   }
 }
 
-function buildCodeLenses(tasks: EditTask[], document: vscode.TextDocument): vscode.CodeLens[] {
+function buildCodeLenses(
+  tasks: EditTask[],
+  document: vscode.TextDocument,
+): vscode.CodeLens[] {
   const documentLength = document.getText().length;
   const lenses: vscode.CodeLens[] = [];
   for (const task of tasks) {
-    if (task.documentUri !== document.uri.toString() || HIDDEN_STATES.has(task.taskState)) {
+    if (
+      task.documentUri !== document.uri.toString() ||
+      HIDDEN_STATES.has(task.taskState)
+    ) {
       continue;
     }
     const offset = Math.min(Math.max(task.currentStart, 0), documentLength);

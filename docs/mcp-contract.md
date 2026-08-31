@@ -6,6 +6,12 @@ The stdio server uses the `anchor.*` namespace. All tools proxy through the acti
 
 No input. Returns tasks exposed by the active VS Code window so an agent or adapter can discover newly created work.
 
+## `anchor.claim_task`
+
+Input: `{ taskId?, sourceSessionId?, sourceNodeId? }`
+
+Claims the oldest pending instruction, or one from `taskId`, with an expiring lease. Use this from the current Agent conversation when the host does not support automatic MCP Sampling. Optional source IDs associate the logical Anchor branch with native host context.
+
 ## `anchor.get_task`
 
 Input: `{ taskId: string }`
@@ -66,6 +72,12 @@ Creates an immutable candidate and completes the referenced pending instruction.
 Input: `{ taskId, question, options? }`
 
 Marks the task as waiting for user input. Interactive response transport is planned after the initial bridge.
+
+## Automatic sampling
+
+After MCP initialization, the stdio server checks client capabilities. A client with `sampling/createMessage` receives pending instructions automatically. When `sampling.tools` is also available, the model may call read-document and search-workspace during the sampling loop. Invalid output or rejected sampling is retried with a lease-backed exponential delay, up to three attempts.
+
+Sampling without tool support receives only the selected Base text and task-local revision history. Basic MCP clients remain usable through `anchor.claim_task`.
 
 ## Explicit exclusions
 

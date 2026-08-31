@@ -35,6 +35,10 @@
         "title": "Anchor Agent: Continue Refining Candidate"
       },
       {
+        "command": "anchorAgent.retryTask",
+        "title": "Anchor Agent: Retry Failed Task"
+      },
+      {
         "command": "anchorAgent.cancelTask",
         "title": "Anchor Agent: Cancel Task"
       }
@@ -67,6 +71,18 @@
           ],
           "default": "prompt",
           "description": "How to handle edits made inside an active anchor."
+        },
+        "anchorAgent.autoDispatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically dispatch pending instructions when the MCP host supports sampling."
+        },
+        "anchorAgent.samplingMaxTokens": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 512,
+          "maximum": 32768,
+          "description": "Maximum output tokens for an automatically dispatched MCP sampling request."
         },
         "anchorAgent.allowWorkspaceReads": {
           "type": "boolean",

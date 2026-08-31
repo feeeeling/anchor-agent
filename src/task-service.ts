@@ -18,6 +18,19 @@ const TERMINAL_STATES = new Set([
   "archived",
 ]);
 
+export interface InstructionClaim {
+  task: Omit<EditTask, "documentSnapshot">;
+  instruction: TaskInstruction;
+}
+
+export interface ClaimInstructionRequest {
+  dispatcherId: string;
+  leaseMs: number;
+  taskId?: string;
+  sourceSessionId?: string;
+  sourceNodeId?: string;
+}
+
 export class TaskService implements vscode.Disposable {
   private readonly tasks = new Map<string, EditTask>();
   private readonly changeEmitter = new vscode.EventEmitter<void>();
@@ -32,9 +45,13 @@ export class TaskService implements vscode.Disposable {
             text: task.instruction,
             status: task.revisions.length > 0 ? "completed" : "pending",
             ...(task.revisions[0] ? { revisionId: task.revisions[0].id } : {}),
+            dispatchAttempts: 0,
             createdAt: task.createdAt,
           },
         ];
+      }
+      for (const instruction of task.instructions) {
+        instruction.dispatchAttempts ??= 0;
       }
       this.tasks.set(task.id, task);
     }
@@ -80,6 +97,7 @@ export class TaskService implements vscode.Disposable {
           id: randomUUID(),
           text: instruction,
           status: "pending",
+          dispatchAttempts: 0,
           createdAt: now,
         },
       ],
@@ -148,6 +166,91 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
+  async claimInstruction(request: ClaimInstructionRequest): Promise<InstructionClaim | undefined> {
+    const now = Date.now();
+    const candidates = [...this.tasks.values()].sort(
+      (left, right) => left.createdAt - right.createdAt,
+    );
+    for (const task of candidates) {
+      if (
+        (request.taskId && task.id !== request.taskId) ||
+        TERMINAL_STATES.has(task.taskState) ||
+        task.taskState === "orphaned"
+      ) {
+        continue;
+      }
+      for (const instruction of task.instructions) {
+        if (
+          instruction.status === "dispatching" &&
+          (instruction.leaseUntil ?? 0) <= now
+        ) {
+          instruction.status = "pending";
+          delete instruction.dispatcherId;
+          delete instruction.leaseUntil;
+        }
+        if (instruction.status !== "pending") {
+          continue;
+        }
+        instruction.status = "dispatching";
+        instruction.dispatcherId = request.dispatcherId;
+        instruction.leaseUntil = now + Math.min(Math.max(request.leaseMs, 5_000), 300_000);
+        instruction.dispatchAttempts += 1;
+        delete instruction.lastError;
+        task.taskState = "queued";
+        task.progress = {
+          stage: "dispatching",
+          message: "A connected Agent claimed this instruction",
+        };
+        if (request.sourceSessionId) {
+          task.sourceSessionId = request.sourceSessionId;
+        }
+        if (request.sourceNodeId) {
+          task.sourceNodeId = request.sourceNodeId;
+        }
+        task.updatedAt = now;
+        await this.changed();
+        return { task: this.publicView(task), instruction };
+      }
+    }
+    return undefined;
+  }
+
+  async failInstruction(
+    instructionId: string,
+    dispatcherId: string,
+    message: string,
+  ): Promise<void> {
+    for (const task of this.tasks.values()) {
+      const instruction = task.instructions.find((item) => item.id === instructionId);
+      if (!instruction) {
+        continue;
+      }
+      if (instruction.dispatcherId && instruction.dispatcherId !== dispatcherId) {
+        throw new Error("Instruction is leased by another dispatcher");
+      }
+      instruction.lastError = message;
+      delete instruction.dispatcherId;
+      if (instruction.dispatchAttempts < 3) {
+        instruction.status = "dispatching";
+        instruction.leaseUntil = Date.now() + 5_000 * 2 ** instruction.dispatchAttempts;
+        task.taskState = "queued";
+        task.progress = {
+          stage: "retrying",
+          message: `Agent dispatch failed; retrying (${instruction.dispatchAttempts}/3)`,
+        };
+      } else {
+        instruction.status = "failed";
+        delete instruction.leaseUntil;
+        task.taskState = "failed";
+        task.progress = { stage: "failed", message };
+      }
+      task.updatedAt = Date.now();
+      await this.changed();
+      return;
+    }
+    throw new Error(`Unknown instruction: ${instructionId}`);
+  }
+
   async rebaseTask(
     taskId: string,
     document: vscode.TextDocument,
@@ -182,6 +285,7 @@ export class TaskService implements vscode.Disposable {
       id: randomUUID(),
       text: instruction,
       status: "pending",
+      dispatchAttempts: 0,
       createdAt: Date.now(),
       ...(task.activeRevisionId
         ? { parentRevisionId: task.activeRevisionId }
@@ -211,7 +315,7 @@ export class TaskService implements vscode.Disposable {
       ? task.instructions.find((item) => item.id === candidate.instructionId)
       : [...task.instructions]
           .reverse()
-          .find((item) => item.status === "pending");
+          .find((item) => item.status === "pending" || item.status === "dispatching");
     if (candidate.instructionId && !pendingInstruction) {
       throw new Error(`Unknown instruction: ${candidate.instructionId}`);
     }
@@ -238,6 +342,9 @@ export class TaskService implements vscode.Disposable {
     if (pendingInstruction) {
       pendingInstruction.status = "completed";
       pendingInstruction.revisionId = revision.id;
+      delete pendingInstruction.dispatcherId;
+      delete pendingInstruction.leaseUntil;
+      delete pendingInstruction.lastError;
     }
     task.activeRevisionId = revision.id;
     task.progress = {
@@ -252,6 +359,26 @@ export class TaskService implements vscode.Disposable {
     task.updatedAt = Date.now();
     await this.changed();
     return revision;
+  }
+
+  async retryTask(taskId: string): Promise<TaskInstruction> {
+    const task = this.require(taskId);
+    const instruction = [...task.instructions]
+      .reverse()
+      .find((item) => item.status === "failed");
+    if (!instruction) {
+      throw new Error("This task has no failed instruction to retry");
+    }
+    instruction.status = "pending";
+    instruction.dispatchAttempts = 0;
+    delete instruction.dispatcherId;
+    delete instruction.leaseUntil;
+    delete instruction.lastError;
+    task.taskState = "created";
+    task.progress = { stage: "queued", message: "Retry queued for a connected Agent" };
+    task.updatedAt = Date.now();
+    await this.changed();
+    return instruction;
   }
 
   async requestClarification(

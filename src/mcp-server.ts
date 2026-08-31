@@ -1,18 +1,14 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { McpBridgeClient } from "./mcp-bridge-client.js";
+import { SamplingDispatcher } from "./sampling-dispatcher.js";
 
-interface ConnectionDescriptor {
-  endpoint: string;
-  token: string;
-}
-
-const descriptorPath = join(homedir(), ".anchor-agent", "connection.json");
 const server = new McpServer({ name: "anchor-agent", version: "0.1.0" });
+const bridge = new McpBridgeClient();
+const dispatcherId = `mcp-${randomUUID()}`;
 
 server.registerTool(
   "anchor.list_tasks",
@@ -22,6 +18,29 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   async () => toolCall("/v1/tasks"),
+);
+
+server.registerTool(
+  "anchor.claim_task",
+  {
+    description:
+      "Claim a pending task instruction in the current Agent conversation. Use this when automatic sampling is unavailable.",
+    inputSchema: {
+      taskId: z.string().optional(),
+      sourceSessionId: z.string().optional(),
+      sourceNodeId: z.string().optional(),
+    },
+  },
+  async (input) =>
+    toolCall("/v1/dispatch/claim", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        dispatcherId,
+        leaseMs: 120_000,
+        mode: "manual",
+      }),
+    }),
 );
 
 server.registerTool(
@@ -126,56 +145,20 @@ server.registerTool(
     }),
 );
 
-async function toolCall(path: string, init: RequestInit = {}) {
-  try {
-    const descriptor = await loadDescriptor();
-    const response = await fetch(`${descriptor.endpoint}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${descriptor.token}`,
-        "content-type": "application/json",
-        ...init.headers,
-      },
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Anchor bridge returned ${response.status}: ${text}`);
-    }
-    return { content: [{ type: "text" as const, text }] };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      isError: true,
-      content: [{ type: "text" as const, text: message }],
-    };
-  }
-}
-
-async function loadDescriptor(): Promise<ConnectionDescriptor> {
-  let value: unknown;
-  try {
-    value = JSON.parse(await readFile(descriptorPath, "utf8"));
-  } catch {
-    throw new Error(
-      "No active Anchor Agent extension was found. Open the VS Code workspace first.",
-    );
-  }
-  if (!value || typeof value !== "object") {
-    throw new Error("The Anchor Agent connection descriptor is invalid.");
-  }
-  const descriptor = value as Record<string, unknown>;
-  if (
-    typeof descriptor.endpoint !== "string" ||
-    typeof descriptor.token !== "string"
-  ) {
-    throw new Error("The Anchor Agent connection descriptor is incomplete.");
-  }
-  return { endpoint: descriptor.endpoint, token: descriptor.token };
+function toolCall(path: string, init: RequestInit = {}) {
+  return bridge.toolResult(path, init);
 }
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  const dispatcher = new SamplingDispatcher(server, bridge, dispatcherId);
+  process.once("SIGINT", () => dispatcher.stop());
+  process.once("SIGTERM", () => dispatcher.stop());
+  void dispatcher.start().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Anchor auto-dispatch stopped: ${message}\n`);
+  });
 }
 
 void main().catch((error) => {

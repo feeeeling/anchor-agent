@@ -24,8 +24,12 @@ export interface TaskInstruction {
   id: string;
   text: string;
   parentRevisionId?: string;
-  status: "pending" | "completed";
+  status: "pending" | "dispatching" | "completed" | "failed";
   revisionId?: string;
+  dispatcherId?: string;
+  leaseUntil?: number;
+  dispatchAttempts: number;
+  lastError?: string;
   createdAt: number;
 }
 

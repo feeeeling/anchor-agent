@@ -9,7 +9,9 @@ Early MVP foundation:
 - selection task creation and tracked anchors;
 - task persistence and editor decorations;
 - local authenticated bridge API;
-- stdio MCP server exposing read/search/progress/revision tools;
+- stdio MCP server exposing claim/read/search/progress/revision tools;
+- automatic dispatch through MCP Sampling, with read tools when the host supports them;
+- leased retries plus explicit retry for failed Agent dispatches;
 - explicit review and follow-up instructions on a task-local logical branch;
 - configurable conflict handling with rebase/regeneration or reviewed three-way merge.
 

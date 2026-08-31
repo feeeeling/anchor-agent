@@ -58,6 +58,10 @@ export async function activate(
       (value?: unknown) => continueTask(tasks, value),
     ),
     vscode.commands.registerCommand(
+      "anchorAgent.retryTask",
+      (value?: unknown) => retryTask(tasks, value),
+    ),
+    vscode.commands.registerCommand(
       "anchorAgent.cancelTask",
       async (value?: unknown) => {
         const taskId = taskIdFrom(value);
@@ -121,9 +125,13 @@ async function reviewTask(tasks: TaskService, value?: unknown): Promise<void> {
     return;
   }
   if (task.revisions.length === 0) {
-    void vscode.window.showInformationMessage(
+    const action = await vscode.window.showInformationMessage(
       `${task.taskState}: ${task.progress?.message ?? "No candidate revision has been submitted yet."}`,
+      ...(task.taskState === "failed" ? ["Retry"] : []),
     );
+    if (action === "Retry") {
+      await retryTask(tasks, task.id);
+    }
     return;
   }
   const revision =
@@ -160,6 +168,20 @@ async function reviewTask(tasks: TaskService, value?: unknown): Promise<void> {
     await acceptTask(tasks, task.id);
   } else if (action === "Continue refining") {
     await continueTask(tasks, task.id);
+  }
+}
+
+async function retryTask(tasks: TaskService, value?: unknown): Promise<void> {
+  const taskId = taskIdFrom(value);
+  if (!taskId) {
+    return;
+  }
+  try {
+    await tasks.retryTask(taskId);
+    void vscode.window.showInformationMessage("Anchor Agent retry queued.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(message);
   }
 }
 
@@ -223,7 +245,10 @@ async function acceptTask(tasks: TaskService, value?: unknown): Promise<void> {
     return;
   }
   await tasks.setState(task.id, "applying");
-  if (document.version !== checkedVersion || document.getText(range) !== task.baseText) {
+  if (
+    document.version !== checkedVersion ||
+    document.getText(range) !== task.baseText
+  ) {
     await tasks.setState(task.id, "conflicted");
     void vscode.window.showWarningMessage(
       "The document changed while applying the candidate. No edit was made.",
@@ -247,7 +272,9 @@ interface ChangedAnchorContext {
   remoteText: string;
 }
 
-async function handleChangedAnchor(context: ChangedAnchorContext): Promise<void> {
+async function handleChangedAnchor(
+  context: ChangedAnchorContext,
+): Promise<void> {
   const { tasks, taskId, document, currentText, remoteText } = context;
   const task = tasks.get(taskId);
   if (!task) {
@@ -302,11 +329,15 @@ async function handleChangedAnchor(context: ChangedAnchorContext): Promise<void>
   await tasks.rebaseTask(task.id, document);
   const mergedCandidate = {
     replacement: result.merged,
-    summary: "Merged non-overlapping local and Agent changes; review before applying.",
+    summary:
+      "Merged non-overlapping local and Agent changes; review before applying.",
     basedOnDocumentVersion: document.version,
   };
   if (parentRevisionId) {
-    await tasks.submitRevision(task.id, { ...mergedCandidate, parentRevisionId });
+    await tasks.submitRevision(task.id, {
+      ...mergedCandidate,
+      parentRevisionId,
+    });
   } else {
     await tasks.submitRevision(task.id, mergedCandidate);
   }

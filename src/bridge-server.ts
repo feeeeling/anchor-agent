@@ -9,7 +9,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as vscode from "vscode";
-import type { TaskService } from "./task-service.js";
+import type { ClaimInstructionRequest, TaskService } from "./task-service.js";
 import type { Revision, TaskProgress } from "./types.js";
 
 interface ConnectionDescriptor {
@@ -86,7 +86,47 @@ export class BridgeServer implements vscode.Disposable {
       const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(
         url.pathname,
       );
+      const dispatchFailureMatch = /^\/v1\/dispatch\/instructions\/([^/]+)\/fail$/.exec(
+        url.pathname,
+      );
 
+      if (request.method === "POST" && url.pathname === "/v1/dispatch/claim") {
+        const body = await this.readBody(request);
+        if (!isDispatchClaimRequest(body)) {
+          throw new Error("dispatcherId, leaseMs, and mode are required");
+        }
+        if (body.mode === "auto" && !this.autoDispatchAllowed()) {
+          this.json(response, 200, { claim: null, autoDispatch: false });
+          return;
+        }
+        const claimRequest: ClaimInstructionRequest = {
+          dispatcherId: body.dispatcherId,
+          leaseMs: body.leaseMs,
+          ...(body.taskId ? { taskId: body.taskId } : {}),
+          ...(body.sourceSessionId ? { sourceSessionId: body.sourceSessionId } : {}),
+          ...(body.sourceNodeId ? { sourceNodeId: body.sourceNodeId } : {}),
+        };
+        const claim = await this.tasks.claimInstruction(claimRequest);
+        this.json(response, 200, {
+          claim: claim ?? null,
+          autoDispatch: true,
+          maxTokens: this.samplingMaxTokens(),
+        });
+        return;
+      }
+      if (request.method === "POST" && dispatchFailureMatch?.[1]) {
+        const body = await this.readBody(request);
+        if (!isDispatchFailureRequest(body)) {
+          throw new Error("dispatcherId and message are required");
+        }
+        await this.tasks.failInstruction(
+          decodeURIComponent(dispatchFailureMatch[1]),
+          body.dispatcherId,
+          body.message,
+        );
+        this.json(response, 200, { ok: true });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/v1/tasks") {
         this.json(response, 200, {
           tasks: this.tasks.list().map((task) => this.tasks.publicView(task)),
@@ -243,6 +283,16 @@ export class BridgeServer implements vscode.Disposable {
     this.json(response, 200, { matches });
   }
 
+  private autoDispatchAllowed(): boolean {
+    return vscode.workspace.getConfiguration("anchorAgent").get("autoDispatch", true);
+  }
+
+  private samplingMaxTokens(): number {
+    return vscode.workspace
+      .getConfiguration("anchorAgent")
+      .get("samplingMaxTokens", 8_192);
+  }
+
   private workspaceReadsAllowed(): boolean {
     return vscode.workspace
       .getConfiguration("anchorAgent")
@@ -292,6 +342,36 @@ export class BridgeServer implements vscode.Disposable {
       // Another window may own the descriptor, or it may already be gone.
     }
   }
+}
+
+function isDispatchClaimRequest(value: unknown): value is {
+  dispatcherId: string;
+  leaseMs: number;
+  mode: "auto" | "manual";
+  taskId?: string;
+  sourceSessionId?: string;
+  sourceNodeId?: string;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.dispatcherId === "string" &&
+    typeof candidate.leaseMs === "number" &&
+    (candidate.mode === "auto" || candidate.mode === "manual")
+  );
+}
+
+function isDispatchFailureRequest(value: unknown): value is {
+  dispatcherId: string;
+  message: string;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.dispatcherId === "string" && typeof candidate.message === "string";
 }
 
 function isSearchRequest(value: unknown): value is {

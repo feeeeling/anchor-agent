@@ -15,6 +15,8 @@ VS Code extension
 stdio MCP bridge
   ├─ discovers the active extension endpoint
   ├─ maps MCP tools to LocalBridge requests
+  ├─ leases pending task instructions
+  ├─ requests client sampling when supported
   └─ never accesses workspace files directly
                │
                ▼
@@ -47,8 +49,11 @@ Each task stores instruction turns separately from candidate revisions. A follow
 
 MCP standardizes tools and resources, not universal agent invocation or conversation forks. Anchor Agent therefore distinguishes:
 
-1. basic MCP tool compatibility;
-2. automatic dispatch through host sampling or an adapter;
-3. native session branching.
+1. basic MCP tool compatibility through `anchor.claim_task`;
+2. automatic dispatch through client sampling;
+3. sampling with read-only tools;
+4. native session branching supplied by a host adapter.
 
-Missing native branching degrades to task-local history replay without changing the editor UX.
+The MCP process polls for pending instructions only after the host advertises sampling. Claims have expiring leases so multiple clients cannot process the same turn. Failures back off and retry three times. A sampling host without tool support sees only the selected text; one with sampling tools may read the task snapshot/current file and search the workspace through the extension.
+
+Missing native branching degrades to persisted task-local instruction/revision history without changing the editor UX. Sampling itself does not expose the active host conversation ancestry.
