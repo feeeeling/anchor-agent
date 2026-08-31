@@ -1,5 +1,8 @@
 # Anchor Agent
 
+[![CI](https://github.com/feeeeling/anchor-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/feeeeling/anchor-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Anchor Agent is a VS Code extension for asynchronous, selection-scoped AI editing. A task remains attached to its logical text range while the user edits elsewhere. MCP-compatible agents may read context and submit candidate revisions, but they cannot apply edits directly.
 
 ## Current status
@@ -17,6 +20,18 @@ Early MVP foundation:
 - configurable conflict handling with rebase/regeneration or reviewed three-way merge.
 
 See [`docs/PRD.md`](docs/PRD.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/mcp-contract.md`](docs/mcp-contract.md).
+
+## Install
+
+Download `anchor-agent.vsix` from the latest GitHub prerelease and install it:
+
+```bash
+code --install-extension anchor-agent.vsix
+```
+
+In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette and paste the copied JSON into your MCP host configuration. Then select text and run **Anchor Agent: Rewrite Selection** or press `Cmd+Shift+I` / `Ctrl+Shift+I`.
+
+This is an early prerelease. Back up important work and review every candidate before accepting it.
 
 ## Development
 
@@ -41,3 +56,9 @@ Run the extension with VS Code's Extension Development Host. Configure an MCP ho
 ```
 
 The bridge discovers live windows through `~/.anchor-agent/connections/`. In multi-window setups, set `ANCHOR_AGENT_WORKSPACE` in the MCP process or use `anchor.list_connections` followed by `anchor.use_connection`. Call `anchor.list_tasks` to discover a newly created task.
+
+## Contributing and security
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development and pull-request guidance. Report vulnerabilities according to [`SECURITY.md`](SECURITY.md).
+
+Released under the [MIT License](LICENSE).

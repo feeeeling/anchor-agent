@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import type { TaskService } from "./task-service.js";
-import type { EditTask } from "./types.js";
 
 const HIDDEN_STATES = new Set(["applied", "rejected", "cancelled", "archived"]);
 

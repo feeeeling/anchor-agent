@@ -5,6 +5,7 @@ import { AnchorCodeLensProvider } from "./code-lenses.js";
 import { AnchorDecorations } from "./decorations.js";
 import { DIFF_SCHEME, DiffContentProvider } from "./diff-content.js";
 import { promptForInstruction } from "./instruction-panel.js";
+import { createMcpConfiguration } from "./mcp-config.js";
 import { TaskDetailsPanelManager } from "./task-details-panel.js";
 import { TaskService } from "./task-service.js";
 import { TaskTreeProvider } from "./task-tree.js";
@@ -72,6 +73,10 @@ export async function activate(
       (value?: unknown) => retryTask(tasks, value),
     ),
     vscode.commands.registerCommand(
+      "anchorAgent.copyMcpConfig",
+      () => copyMcpConfiguration(context),
+    ),
+    vscode.commands.registerCommand(
       "anchorAgent.cancelTask",
       async (value?: unknown) => {
         const taskId = taskIdFrom(value);
@@ -90,6 +95,22 @@ export async function activate(
       `Anchor Agent MCP bridge did not start: ${message}`,
     );
   }
+}
+
+async function copyMcpConfiguration(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const serverPath = vscode.Uri.joinPath(
+    context.extensionUri,
+    "dist",
+    "mcp-server.cjs",
+  ).fsPath;
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const configuration = createMcpConfiguration(serverPath, workspacePath);
+  await vscode.env.clipboard.writeText(JSON.stringify(configuration, null, 2));
+  void vscode.window.showInformationMessage(
+    "Anchor Agent MCP configuration copied.",
+  );
 }
 
 async function createTask(

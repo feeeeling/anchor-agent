@@ -4,6 +4,23 @@
   "description": "Asynchronous, anchored AI edits through MCP.",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "feeeeling",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feeeeling/anchor-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/feeeeling/anchor-agent/issues"
+  },
+  "homepage": "https://github.com/feeeeling/anchor-agent#readme",
+  "keywords": [
+    "vscode",
+    "mcp",
+    "agent",
+    "ai-editing",
+    "code-review"
+  ],
   "type": "module",
   "engines": {
     "vscode": "^1.95.0"
@@ -45,6 +62,10 @@
       {
         "command": "anchorAgent.cancelTask",
         "title": "Anchor Agent: Cancel Task"
+      },
+      {
+        "command": "anchorAgent.copyMcpConfig",
+        "title": "Anchor Agent: Copy MCP Configuration"
       }
     ],
     "keybindings": [

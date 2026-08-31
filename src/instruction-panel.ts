@@ -19,7 +19,7 @@ export function promptForInstruction(
     { enableScripts: true, retainContextWhenHidden: false },
   );
   const nonce = randomBytes(16).toString("base64url");
-  panel.webview.html = renderHtml(panel.webview, nonce, selectionText);
+  panel.webview.html = renderHtml(nonce, selectionText);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -78,11 +78,7 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
   };
 }
 
-function renderHtml(
-  webview: vscode.Webview,
-  nonce: string,
-  selectionText: string,
-): string {
+function renderHtml(nonce: string, selectionText: string): string {
   const preview =
     selectionText.length > MAX_PREVIEW_LENGTH
       ? `${selectionText.slice(0, MAX_PREVIEW_LENGTH)}\n…`
