@@ -23,10 +23,10 @@ See [`docs/PRD.md`](docs/PRD.md), [`docs/architecture.md`](docs/architecture.md)
 
 ## Install
 
-Download `anchor-agent.vsix` from the latest GitHub prerelease and install it:
+Download `anchor-agent-0.1.0.vsix` from the latest GitHub prerelease and install it:
 
 ```bash
-code --install-extension anchor-agent.vsix
+code --install-extension anchor-agent-0.1.0.vsix
 ```
 
 In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette and paste the copied JSON into your MCP host configuration. Then select text and run **Anchor Agent: Rewrite Selection** or press `Cmd+Shift+I` / `Ctrl+Shift+I`.
