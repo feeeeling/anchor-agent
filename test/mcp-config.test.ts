@@ -3,7 +3,9 @@ import { createMcpConfiguration } from "../src/mcp-config.js";
 
 describe("createMcpConfiguration", () => {
   it("points the host at the bundled stdio server", () => {
-    expect(createMcpConfiguration("/extensions/anchor/dist/mcp-server.cjs")).toEqual({
+    expect(
+      createMcpConfiguration("/extensions/anchor/dist/mcp-server.cjs"),
+    ).toEqual({
       mcpServers: {
         "anchor-agent": {
           command: "node",

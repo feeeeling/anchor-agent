@@ -42,7 +42,9 @@ export class BridgeServer implements vscode.Disposable {
         vscode.workspace.workspaceFolders?.map((folder) =>
           folder.uri.toString(),
         ) ?? [],
-      ...(vscode.workspace.name ? { workspaceName: vscode.workspace.name } : {}),
+      ...(vscode.workspace.name
+        ? { workspaceName: vscode.workspace.name }
+        : {}),
     });
   }
 
@@ -317,7 +319,6 @@ export class BridgeServer implements vscode.Disposable {
     });
     response.end(JSON.stringify(body));
   }
-
 }
 
 function isDispatchClaimRequest(value: unknown): value is {

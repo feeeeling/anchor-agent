@@ -38,7 +38,10 @@ export class McpBridgeClient {
   async listConnections(): Promise<PublicConnectionDescriptor[]> {
     const descriptors = await this.readRegistry();
     const selected = await this.resolveDescriptor().catch(() => undefined);
-    if (selected && !descriptors.some((item) => item.connectionId === selected.connectionId)) {
+    if (
+      selected &&
+      !descriptors.some((item) => item.connectionId === selected.connectionId)
+    ) {
       descriptors.push(selected);
     }
     return descriptors.map(({ token: _, ...descriptor }) => ({
@@ -49,7 +52,9 @@ export class McpBridgeClient {
 
   async selectConnection(connectionId: string): Promise<void> {
     const descriptors = await this.readRegistry();
-    const descriptor = descriptors.find((item) => item.connectionId === connectionId);
+    const descriptor = descriptors.find(
+      (item) => item.connectionId === connectionId,
+    );
     if (!descriptor) {
       throw new Error(`Unknown Anchor Agent connection: ${connectionId}`);
     }
@@ -82,13 +87,19 @@ export class McpBridgeClient {
     }
     const descriptors = await this.readRegistry();
     if (descriptors.length === 0) {
-      throw new Error("No active Anchor Agent extension was found. Open the VS Code workspace first.");
+      throw new Error(
+        "No active Anchor Agent extension was found. Open the VS Code workspace first.",
+      );
     }
     let selected = this.selectedConnectionId
-      ? descriptors.find((item) => item.connectionId === this.selectedConnectionId)
+      ? descriptors.find(
+          (item) => item.connectionId === this.selectedConnectionId,
+        )
       : undefined;
     selected ??= this.workspaceHint
-      ? descriptors.find((item) => matchesWorkspace(item, this.workspaceHint ?? ""))
+      ? descriptors.find((item) =>
+          matchesWorkspace(item, this.workspaceHint ?? ""),
+        )
       : undefined;
     if (!selected) {
       const activeId = await this.readActiveConnectionId();
@@ -96,7 +107,9 @@ export class McpBridgeClient {
         ? descriptors.find((item) => item.connectionId === activeId)
         : undefined;
     }
-    selected ??= [...descriptors].sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    selected ??= [...descriptors].sort(
+      (left, right) => right.updatedAt - left.updatedAt,
+    )[0];
     if (!selected) {
       throw new Error("No usable Anchor Agent connection was found.");
     }
@@ -111,20 +124,28 @@ export class McpBridgeClient {
       await Promise.all(
         entries
           .filter((entry) => entry.endsWith(".json"))
-          .map((entry) => readDescriptor(join(directory, entry)).catch(() => undefined)),
+          .map((entry) =>
+            readDescriptor(join(directory, entry)).catch(() => undefined),
+          ),
       )
     ).filter((value): value is ConnectionDescriptor => value !== undefined);
-    const liveDescriptors = descriptors.filter((descriptor) => processIsAlive(descriptor.pid));
+    const liveDescriptors = descriptors.filter((descriptor) =>
+      processIsAlive(descriptor.pid),
+    );
     if (liveDescriptors.length > 0) {
       return liveDescriptors;
     }
-    const legacy = await readDescriptor(join(this.root, "connection.json")).catch(() => undefined);
+    const legacy = await readDescriptor(
+      join(this.root, "connection.json"),
+    ).catch(() => undefined);
     return legacy && processIsAlive(legacy.pid) ? [legacy] : [];
   }
 
   private async readActiveConnectionId(): Promise<string | undefined> {
     try {
-      const value: unknown = JSON.parse(await readFile(join(this.root, "active.json"), "utf8"));
+      const value: unknown = JSON.parse(
+        await readFile(join(this.root, "active.json"), "utf8"),
+      );
       if (value && typeof value === "object") {
         const connectionId = (value as Record<string, unknown>).connectionId;
         return typeof connectionId === "string" ? connectionId : undefined;
@@ -150,7 +171,9 @@ async function readDescriptor(path: string): Promise<ConnectionDescriptor> {
   return descriptor;
 }
 
-function decodeConnectionDescriptor(value: unknown): ConnectionDescriptor | undefined {
+function decodeConnectionDescriptor(
+  value: unknown,
+): ConnectionDescriptor | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
@@ -190,7 +213,10 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-function matchesWorkspace(descriptor: ConnectionDescriptor, hint: string): boolean {
+function matchesWorkspace(
+  descriptor: ConnectionDescriptor,
+  hint: string,
+): boolean {
   const normalizedHint = normalizeWorkspace(hint);
   return descriptor.workspaceFolders.some(
     (folder) => normalizeWorkspace(folder) === normalizedHint,

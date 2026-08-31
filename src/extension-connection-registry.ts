@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as vscode from "vscode";
@@ -16,7 +23,9 @@ export class ExtensionConnectionRegistry implements vscode.Disposable {
   private heartbeat: NodeJS.Timeout | undefined;
   private windowSubscription: vscode.Disposable | undefined;
 
-  async start(input: Omit<ConnectionDescriptor, "connectionId" | "updatedAt">): Promise<void> {
+  async start(
+    input: Omit<ConnectionDescriptor, "connectionId" | "updatedAt">,
+  ): Promise<void> {
     this.descriptor = {
       ...input,
       connectionId: this.connectionId,
@@ -59,7 +68,9 @@ export class ExtensionConnectionRegistry implements vscode.Disposable {
   }
 
   private async removeOwnedFiles(): Promise<void> {
-    await unlink(join(CONNECTIONS, `${this.connectionId}.json`)).catch(() => undefined);
+    await unlink(join(CONNECTIONS, `${this.connectionId}.json`)).catch(
+      () => undefined,
+    );
     await Promise.all([
       removeIfOwned(ACTIVE_PATH, this.connectionId),
       removeIfOwned(LEGACY_PATH, this.connectionId),
@@ -75,9 +86,15 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await chmod(path, 0o600);
 }
 
-async function removeIfOwned(path: string, connectionId: string): Promise<void> {
+async function removeIfOwned(
+  path: string,
+  connectionId: string,
+): Promise<void> {
   try {
-    const value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const value = JSON.parse(await readFile(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
     if (value.connectionId === connectionId) {
       await unlink(path);
     }

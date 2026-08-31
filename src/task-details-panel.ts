@@ -3,7 +3,12 @@ import * as vscode from "vscode";
 import type { TaskService } from "./task-service.js";
 import type { EditTask } from "./types.js";
 
-const TERMINAL_STATES = new Set(["applied", "cancelled", "rejected", "archived"]);
+const TERMINAL_STATES = new Set([
+  "applied",
+  "cancelled",
+  "rejected",
+  "archived",
+]);
 
 interface PanelMessage {
   type: "ready" | "accept" | "openDiff" | "continue" | "retry" | "cancel";
@@ -85,8 +90,10 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
         revisionCount: task.revisions.length,
         instructionCount: task.instructions.length,
         hasCandidate: revision !== undefined,
-        canAccept: revision !== undefined && !TERMINAL_STATES.has(task.taskState),
-        canContinue: !TERMINAL_STATES.has(task.taskState) && task.taskState !== "applying",
+        canAccept:
+          revision !== undefined && !TERMINAL_STATES.has(task.taskState),
+        canContinue:
+          !TERMINAL_STATES.has(task.taskState) && task.taskState !== "applying",
         canRetry: task.instructions.some((item) => item.status === "failed"),
       },
     });
@@ -130,7 +137,10 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     }
     const instruction = message.instruction?.trim() ?? "";
     if (!instruction) {
-      await this.post(taskId, { type: "validation", message: "Enter a follow-up instruction." });
+      await this.post(taskId, {
+        type: "validation",
+        message: "Enter a follow-up instruction.",
+      });
       return;
     }
     try {
@@ -156,11 +166,24 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
     return undefined;
   }
   const candidate = value as Record<string, unknown>;
-  const supported = ["ready", "accept", "openDiff", "continue", "retry", "cancel"];
-  if (typeof candidate.type !== "string" || !supported.includes(candidate.type)) {
+  const supported = [
+    "ready",
+    "accept",
+    "openDiff",
+    "continue",
+    "retry",
+    "cancel",
+  ];
+  if (
+    typeof candidate.type !== "string" ||
+    !supported.includes(candidate.type)
+  ) {
     return undefined;
   }
-  if (candidate.instruction !== undefined && typeof candidate.instruction !== "string") {
+  if (
+    candidate.instruction !== undefined &&
+    typeof candidate.instruction !== "string"
+  ) {
     return undefined;
   }
   return {

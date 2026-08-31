@@ -8,6 +8,7 @@ export interface ConnectionDescriptor {
   updatedAt: number;
 }
 
-export interface PublicConnectionDescriptor extends Omit<ConnectionDescriptor, "token"> {
+export interface PublicConnectionDescriptor
+  extends Omit<ConnectionDescriptor, "token"> {
   selected: boolean;
 }

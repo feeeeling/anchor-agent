@@ -9,7 +9,11 @@ const temporaryDirectories: string[] = [];
 afterEach(async () => {
   delete process.env.ANCHOR_AGENT_HOME;
   delete process.env.ANCHOR_AGENT_WORKSPACE;
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe("McpBridgeClient connection selection", () => {
@@ -17,25 +21,55 @@ describe("McpBridgeClient connection selection", () => {
     const root = await createRoot();
     process.env.ANCHOR_AGENT_HOME = root;
     process.env.ANCHOR_AGENT_WORKSPACE = "/workspace/two";
-    await writeDescriptor(root, "one", "http://127.0.0.1:1", "file:///workspace/one", 1);
-    await writeDescriptor(root, "two", "http://127.0.0.1:2", "file:///workspace/two", 2);
+    await writeDescriptor(
+      root,
+      "one",
+      "http://127.0.0.1:1",
+      "file:///workspace/one",
+      1,
+    );
+    await writeDescriptor(
+      root,
+      "two",
+      "http://127.0.0.1:2",
+      "file:///workspace/two",
+      2,
+    );
 
     const client = new McpBridgeClient();
     const connections = await client.listConnections();
 
-    expect(connections.find((item) => item.connectionId === "two")?.selected).toBe(true);
+    expect(
+      connections.find((item) => item.connectionId === "two")?.selected,
+    ).toBe(true);
   });
 
   it("allows an explicit connection selection", async () => {
     const root = await createRoot();
     process.env.ANCHOR_AGENT_HOME = root;
-    await writeDescriptor(root, "one", "http://127.0.0.1:1", "file:///workspace/one", 1);
-    await writeDescriptor(root, "two", "http://127.0.0.1:2", "file:///workspace/two", 2);
+    await writeDescriptor(
+      root,
+      "one",
+      "http://127.0.0.1:1",
+      "file:///workspace/one",
+      1,
+    );
+    await writeDescriptor(
+      root,
+      "two",
+      "http://127.0.0.1:2",
+      "file:///workspace/two",
+      2,
+    );
     const client = new McpBridgeClient();
 
     await client.selectConnection("one");
 
-    expect((await client.listConnections()).find((item) => item.connectionId === "one")?.selected).toBe(true);
+    expect(
+      (await client.listConnections()).find(
+        (item) => item.connectionId === "one",
+      )?.selected,
+    ).toBe(true);
   });
 });
 

@@ -56,9 +56,8 @@ export async function activate(
       "anchorAgent.reviewTask",
       (value?: unknown) => showTaskDetails(details, value),
     ),
-    vscode.commands.registerCommand(
-      "anchorAgent.openDiff",
-      (value?: unknown) => openDiffTask(tasks, value),
+    vscode.commands.registerCommand("anchorAgent.openDiff", (value?: unknown) =>
+      openDiffTask(tasks, value),
     ),
     vscode.commands.registerCommand(
       "anchorAgent.acceptTask",
@@ -72,9 +71,8 @@ export async function activate(
       "anchorAgent.retryTask",
       (value?: unknown) => retryTask(tasks, value),
     ),
-    vscode.commands.registerCommand(
-      "anchorAgent.copyMcpConfig",
-      () => copyMcpConfiguration(context),
+    vscode.commands.registerCommand("anchorAgent.copyMcpConfig", () =>
+      copyMcpConfiguration(context),
     ),
     vscode.commands.registerCommand(
       "anchorAgent.cancelTask",
@@ -175,21 +173,29 @@ async function createTask(
   }
 }
 
-function showTaskDetails(details: TaskDetailsPanelManager, value?: unknown): void {
+function showTaskDetails(
+  details: TaskDetailsPanelManager,
+  value?: unknown,
+): void {
   const taskId = taskIdFrom(value);
   if (taskId) {
     details.show(taskId);
   }
 }
 
-async function openDiffTask(tasks: TaskService, value?: unknown): Promise<void> {
+async function openDiffTask(
+  tasks: TaskService,
+  value?: unknown,
+): Promise<void> {
   const taskId = taskIdFrom(value);
   const task = taskId ? tasks.get(taskId) : undefined;
   const revision =
     task?.revisions.find((item) => item.id === task.activeRevisionId) ??
     task?.revisions.at(-1);
   if (!task || !revision) {
-    void vscode.window.showInformationMessage("No candidate revision is available yet.");
+    void vscode.window.showInformationMessage(
+      "No candidate revision is available yet.",
+    );
     return;
   }
   const baseUri = vscode.Uri.from({
