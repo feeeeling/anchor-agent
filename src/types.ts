@@ -89,3 +89,9 @@ export interface TextChange {
   rangeLength: number;
   text: string;
 }
+
+export interface AnchorSpan {
+  start: number;
+  end: number;
+  state: AnchorState;
+}
