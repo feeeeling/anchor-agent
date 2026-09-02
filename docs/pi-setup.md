@@ -62,6 +62,17 @@ Confirm that the server uses `"lifecycle": "keep-alive"` and that Pi advertises 
 
 After about 12 seconds with no dispatch attempt, the task details panel shows a stall checklist (MCP connection, `/reload`, Sampling authorization, or manual `anchor.claim_task`). The banner clears automatically once an Agent claims the instruction.
 
+### Sampling fails and the task ends in `failed`
+
+Automatic Sampling failures no longer leave the task looking stuck in `created`. After up to three dispatch attempts the task moves to `failed`, and the task details panel shows an actionable error (also stored as `lastError`), for example:
+
+- **Sampling rejected / not authorized** — approve the Sampling prompt in Pi (or set `samplingAutoApprove`), then click **Retry**.
+- **Invalid or empty candidate JSON** — click **Retry**, or claim manually with `anchor.claim_task` and submit a revision.
+- **Maximum tool-call turns** — click **Retry**; if it keeps failing, claim manually.
+- **Bridge / connection errors (`ECONNREFUSED`, disconnected extension)** — confirm VS Code has Anchor Agent open for this workspace, run `/reload` in Pi, then **Retry**.
+
+The panel enables **Retry** whenever any instruction status is `failed`. Manual fallback remains `anchor.list_tasks` → `anchor.claim_task` → `anchor.submit_revision`.
+
 ### `node` is not found
 
 GUI-launched hosts may not inherit the shell `PATH`. Replace `"command": "node"` with the absolute path reported by:

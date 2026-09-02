@@ -60,6 +60,6 @@ MCP standardizes tools and resources, not universal agent invocation or conversa
 3. sampling with read-only tools;
 4. native session branching supplied by a host adapter.
 
-The MCP process polls for pending instructions only after the host advertises sampling. Claims have expiring leases so multiple clients cannot process the same turn. Failures back off and retry three times. A sampling host without tool support sees only the selected text; one with sampling tools may read the task snapshot/current file and search the workspace through the extension.
+The MCP process polls for pending instructions only after the host advertises sampling. Claims have expiring leases so multiple clients cannot process the same turn. Failures back off and retry three times; the final failure stores a user-actionable `lastError` / progress message (approve Sampling, fix MCP, Retry, or claim manually) so the task does not appear stuck in `created`. A sampling host without tool support sees only the selected text; one with sampling tools may read the task snapshot/current file and search the workspace through the extension.
 
 Missing native branching degrades to persisted task-local instruction/revision history without changing the editor UX. Sampling itself does not expose the active host conversation ancestry.
