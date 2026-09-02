@@ -2,15 +2,17 @@
 
 Anchor Agent can dispatch tasks automatically through Pi's MCP Sampling support. The MCP server must stay connected so it can observe tasks created later in VS Code.
 
-## Copy the configuration
+## Copy or write the configuration
 
 1. Install the Anchor Agent VSIX and reload VS Code.
 2. Open the target workspace.
 3. Run **Anchor Agent: Copy MCP Configuration**.
 4. Choose **Pi**.
-5. Save the copied JSON as either:
-   - `.mcp.json` in the directory where Pi will run; or
-   - `~/.config/mcp/mcp.json` for a user-global configuration.
+5. Choose how to apply the configuration:
+   - **Copy to clipboard only**, then paste manually; or
+   - **Write workspace `.mcp.json`**; or
+   - **Write `~/.config/mcp/mcp.json`**.
+6. For write destinations, review the before/after diff, confirm in the modal, and only then is the file written. Existing MCP servers are preserved; Pi `settings.sampling` / `settings.samplingAutoApprove` are merged without wiping unrelated settings. Parent directories under `~/.config/mcp` are created when needed.
 
 The generated Pi entry includes:
 
@@ -52,7 +54,7 @@ For manual fallback, ask Pi to call `anchor.list_tasks`, `anchor.claim_task`, an
 
 ### Pi shows zero MCP servers
 
-The JSON was copied but not saved in a path Pi reads, or Pi has not been reloaded. Use `.mcp.json`, `~/.config/mcp/mcp.json`, or a Pi-owned MCP config, then run `/reload`.
+The JSON was not written (or was only copied) to a path Pi reads, or Pi has not been reloaded. Use the write options for `.mcp.json` / `~/.config/mcp/mcp.json`, or a Pi-owned MCP config, then run `/reload`.
 
 ### The task stays at `created` with zero dispatch attempts
 
