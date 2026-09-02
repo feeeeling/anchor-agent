@@ -41,7 +41,7 @@ Under `regenerateOnChange`, the extension rebases the immutable task snapshot an
 
 ## Editor panels
 
-The initial instruction uses a CSP-restricted Webview textarea. A temporary in-memory anchor follows document changes while this dialog is open, so edits before the selection do not invalidate task creation. The task-details Webview receives state through `postMessage`, renders task values with `textContent`, and exposes review, Diff, accept, retry, cancel, and multiline follow-up actions.
+The initial instruction uses a CSP-restricted Webview textarea. A temporary in-memory anchor follows document changes while this dialog is open, so edits before the selection do not invalidate task creation. The task-details Webview receives state through `postMessage`, renders task values with `textContent`, and shows Base, current Local, and Candidate text. Review actions are accept, reject, copy, Diff, retry, cancel, and multiline follow-up. Rejecting or cancelling a task is terminal: pending instruction leases are invalidated, and later Agent progress or revisions are refused.
 
 ## Stable and current reads
 

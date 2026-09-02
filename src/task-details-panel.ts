@@ -11,7 +11,15 @@ const TERMINAL_STATES = new Set([
 ]);
 
 interface PanelMessage {
-  type: "ready" | "accept" | "openDiff" | "continue" | "retry" | "cancel";
+  type:
+    | "ready"
+    | "accept"
+    | "reject"
+    | "copy"
+    | "openDiff"
+    | "continue"
+    | "retry"
+    | "cancel";
   instruction?: string;
 }
 
@@ -32,7 +40,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     const existing = this.panels.get(taskId);
     if (existing) {
       existing.reveal(vscode.ViewColumn.Beside, false);
-      this.update(existing, task);
+      void this.update(existing, task);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -48,7 +56,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     panel.webview.onDidReceiveMessage((value: unknown) => {
       void this.handleMessage(taskId, value);
     });
-    this.update(panel, task);
+    void this.update(panel, task);
   }
 
   dispose(): void {
@@ -63,40 +71,78 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     for (const [taskId, panel] of this.panels) {
       const task = this.tasks.get(taskId);
       if (task) {
-        this.update(panel, task);
+        void this.update(panel, task);
       } else {
         panel.dispose();
       }
     }
   }
 
-  private update(panel: vscode.WebviewPanel, task: EditTask): void {
+  private async update(
+    panel: vscode.WebviewPanel,
+    task: EditTask,
+  ): Promise<void> {
     const revision =
       task.revisions.find((item) => item.id === task.activeRevisionId) ??
       task.revisions.at(-1);
-    void panel.webview.postMessage({
-      type: "task",
-      task: {
-        id: task.id,
-        title: task.title,
-        taskState: task.taskState,
-        anchorState: task.anchorState,
-        instruction: task.instruction,
-        progress: task.progress?.message ?? "",
-        baseText: task.baseText,
-        candidate: revision?.replacement ?? "",
-        summary: revision?.summary ?? "",
-        warnings: revision?.warnings ?? [],
-        revisionCount: task.revisions.length,
-        instructionCount: task.instructions.length,
-        hasCandidate: revision !== undefined,
-        canAccept:
-          revision !== undefined && !TERMINAL_STATES.has(task.taskState),
-        canContinue:
-          !TERMINAL_STATES.has(task.taskState) && task.taskState !== "applying",
-        canRetry: task.instructions.some((item) => item.status === "failed"),
-      },
-    });
+    let localText = task.baseText;
+    let currentDocumentVersion = task.baseDocumentVersion;
+    try {
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse(task.documentUri),
+      );
+      const range = new vscode.Range(
+        document.positionAt(task.currentStart),
+        document.positionAt(task.currentEnd),
+      );
+      localText = document.getText(range);
+      currentDocumentVersion = document.version;
+    } catch {
+      // Keep the last stable Base visible when the document cannot be opened.
+    }
+    if (!this.panels.has(task.id)) {
+      return;
+    }
+    try {
+      await panel.webview.postMessage({
+        type: "task",
+        task: {
+          id: task.id,
+          title: task.title,
+          taskState: task.taskState,
+          anchorState: task.anchorState,
+          instruction: task.instruction,
+          progress: task.progress?.message ?? "",
+          baseText: task.baseText,
+          localText,
+          currentDocumentVersion,
+          candidate: revision?.replacement ?? "",
+          summary: revision?.summary ?? "",
+          warnings: revision?.warnings ?? [],
+          revisionCount: task.revisions.length,
+          instructionCount: task.instructions.length,
+          hasCandidate: revision !== undefined,
+          canAccept:
+            revision !== undefined &&
+            !TERMINAL_STATES.has(task.taskState) &&
+            task.taskState !== "applying",
+          canReject:
+            revision !== undefined &&
+            !TERMINAL_STATES.has(task.taskState) &&
+            task.taskState !== "applying",
+          canCopy: revision !== undefined,
+          canContinue:
+            !TERMINAL_STATES.has(task.taskState) &&
+            task.taskState !== "applying",
+          canRetry:
+            !TERMINAL_STATES.has(task.taskState) &&
+            task.taskState !== "applying" &&
+            task.instructions.some((item) => item.status === "failed"),
+        },
+      });
+    } catch {
+      // The panel can close while the current document is being read.
+    }
   }
 
   private async handleMessage(taskId: string, value: unknown): Promise<void> {
@@ -108,7 +154,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       const panel = this.panels.get(taskId);
       const task = this.tasks.get(taskId);
       if (panel && task) {
-        this.update(panel, task);
+        void this.update(panel, task);
       }
       return;
     }
@@ -116,15 +162,20 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       await vscode.commands.executeCommand("anchorAgent.acceptTask", taskId);
       return;
     }
+    if (message.type === "reject") {
+      await vscode.commands.executeCommand("anchorAgent.rejectTask", taskId);
+      return;
+    }
+    if (message.type === "copy") {
+      await vscode.commands.executeCommand("anchorAgent.copyCandidate", taskId);
+      return;
+    }
     if (message.type === "openDiff") {
       await vscode.commands.executeCommand("anchorAgent.openDiff", taskId);
       return;
     }
     if (message.type === "cancel") {
-      const task = this.tasks.get(taskId);
-      if (task && !TERMINAL_STATES.has(task.taskState)) {
-        await this.tasks.setState(taskId, "cancelled");
-      }
+      await vscode.commands.executeCommand("anchorAgent.cancelTask", taskId);
       return;
     }
     if (message.type === "retry") {
@@ -169,6 +220,8 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
   const supported = [
     "ready",
     "accept",
+    "reject",
+    "copy",
     "openDiff",
     "continue",
     "retry",
@@ -207,7 +260,7 @@ function renderHtml(nonce: string): string {
     h1 { margin: 0; font-size: 1.3rem; }
     #status { white-space: nowrap; padding: 3px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 999px; }
     .muted { color: var(--vscode-descriptionForeground); }
-    .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     section { margin-top: 16px; }
     pre { min-height: 100px; max-height: 35vh; overflow: auto; margin: 6px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-panel-border); }
     textarea { box-sizing: border-box; width: 100%; min-height: 100px; resize: vertical; padding: 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); font: inherit; }
@@ -225,10 +278,13 @@ function renderHtml(nonce: string): string {
   <section><strong>Instruction</strong><div id="instruction"></div><div id="summary" class="muted"></div><div id="warnings"></div></section>
   <div class="grid">
     <section><strong>Base</strong><pre id="base"></pre></section>
+    <section><strong>Current Local</strong><pre id="local"></pre></section>
     <section><strong>Candidate</strong><pre id="candidate"></pre></section>
   </div>
   <div class="actions">
     <button id="accept">Accept candidate</button>
+    <button id="reject" class="secondary">Reject candidate</button>
+    <button id="copy" class="secondary">Copy candidate</button>
     <button id="diff" class="secondary">Open Diff</button>
     <button id="retry" class="secondary">Retry</button>
     <button id="cancel" class="secondary">Cancel task</button>
@@ -245,6 +301,8 @@ function renderHtml(nonce: string): string {
     let currentTask;
     const send = (type, extra = {}) => vscode.postMessage({ type, ...extra });
     byId('accept').addEventListener('click', () => send('accept'));
+    byId('reject').addEventListener('click', () => send('reject'));
+    byId('copy').addEventListener('click', () => send('copy'));
     byId('diff').addEventListener('click', () => send('openDiff'));
     byId('retry').addEventListener('click', () => send('retry'));
     byId('cancel').addEventListener('click', () => send('cancel'));
@@ -264,14 +322,17 @@ function renderHtml(nonce: string): string {
       const task = currentTask;
       byId('title').textContent = task.title;
       byId('status').textContent = task.taskState + ' / ' + task.anchorState;
-      byId('meta').textContent = task.revisionCount + ' revisions · ' + task.instructionCount + ' instructions';
+      byId('meta').textContent = task.revisionCount + ' revisions · ' + task.instructionCount + ' instructions · document v' + task.currentDocumentVersion;
       byId('progress').textContent = task.progress;
       byId('instruction').textContent = task.instruction;
       byId('summary').textContent = task.summary;
       byId('warnings').textContent = task.warnings.join('\n');
       byId('base').textContent = task.baseText;
+      byId('local').textContent = task.localText;
       byId('candidate').textContent = task.candidate || 'No candidate yet.';
       byId('accept').disabled = !task.canAccept;
+      byId('reject').disabled = !task.canReject;
+      byId('copy').disabled = !task.canCopy;
       byId('diff').disabled = !task.hasCandidate;
       byId('retry').disabled = !task.canRetry;
       byId('cancel').disabled = !task.canContinue;

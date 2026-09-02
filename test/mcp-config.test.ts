@@ -26,4 +26,18 @@ describe("createMcpConfiguration", () => {
       },
     });
   });
+
+  it("keeps the server connected and enables approved sampling for Pi", () => {
+    expect(createMcpConfiguration("/server.cjs", "/workspace", "pi")).toEqual({
+      settings: { sampling: true, samplingAutoApprove: false },
+      mcpServers: {
+        "anchor-agent": {
+          command: "node",
+          args: ["/server.cjs"],
+          env: { ANCHOR_AGENT_WORKSPACE: "/workspace" },
+          lifecycle: "keep-alive",
+        },
+      },
+    });
+  });
 });

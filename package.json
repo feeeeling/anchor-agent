@@ -2,7 +2,8 @@
   "name": "anchor-agent",
   "displayName": "Anchor Agent",
   "description": "Asynchronous, anchored AI edits through MCP.",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "publisher": "feeeeling",
   "private": true,
   "license": "MIT",
   "author": "feeeeling",
@@ -46,6 +47,14 @@
       {
         "command": "anchorAgent.acceptTask",
         "title": "Anchor Agent: Accept Candidate"
+      },
+      {
+        "command": "anchorAgent.rejectTask",
+        "title": "Anchor Agent: Reject Candidate"
+      },
+      {
+        "command": "anchorAgent.copyCandidate",
+        "title": "Anchor Agent: Copy Candidate"
       },
       {
         "command": "anchorAgent.openDiff",

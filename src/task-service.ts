@@ -11,7 +11,9 @@ import type {
 } from "./types.js";
 
 const STORAGE_KEY = "anchorAgent.tasks.v1";
-const TERMINAL_STATES = new Set([
+type TerminalTaskState = "applied" | "rejected" | "cancelled" | "archived";
+
+const TERMINAL_STATES = new Set<EditTask["taskState"]>([
   "applied",
   "rejected",
   "cancelled",
@@ -159,6 +161,7 @@ export class TaskService implements vscode.Disposable {
     progress: TaskProgress,
   ): Promise<EditTask> {
     const task = this.require(taskId);
+    this.ensureMutable(task, "report progress for");
     task.progress = progress;
     task.taskState = "running";
     task.updatedAt = Date.now();
@@ -230,6 +233,7 @@ export class TaskService implements vscode.Disposable {
       if (!instruction) {
         continue;
       }
+      this.ensureMutable(task, "fail an instruction for");
       if (
         instruction.dispatcherId &&
         instruction.dispatcherId !== dispatcherId
@@ -265,6 +269,7 @@ export class TaskService implements vscode.Disposable {
     document: vscode.TextDocument,
   ): Promise<EditTask> {
     const task = this.require(taskId);
+    this.ensureMutable(task, "rebase");
     const range = new vscode.Range(
       document.positionAt(task.currentStart),
       document.positionAt(task.currentEnd),
@@ -323,6 +328,7 @@ export class TaskService implements vscode.Disposable {
     },
   ): Promise<Revision> {
     const task = this.require(taskId);
+    this.ensureMutable(task, "submit a revision for");
     const pendingInstruction = candidate.instructionId
       ? task.instructions.find((item) => item.id === candidate.instructionId)
       : [...task.instructions]
@@ -378,6 +384,7 @@ export class TaskService implements vscode.Disposable {
 
   async retryTask(taskId: string): Promise<TaskInstruction> {
     const task = this.require(taskId);
+    this.ensureMutable(task, "retry");
     const instruction = [...task.instructions]
       .reverse()
       .find((item) => item.status === "failed");
@@ -405,6 +412,7 @@ export class TaskService implements vscode.Disposable {
     options?: string[],
   ): Promise<EditTask> {
     const task = this.require(taskId);
+    this.ensureMutable(task, "request clarification for");
     task.clarification = { question, ...(options?.length ? { options } : {}) };
     task.taskState = "waitingForUser";
     task.updatedAt = Date.now();
@@ -412,11 +420,26 @@ export class TaskService implements vscode.Disposable {
     return task;
   }
 
+  async cancelTask(taskId: string): Promise<EditTask> {
+    return this.terminateTask(taskId, "cancelled", "Task cancelled by user");
+  }
+
+  async rejectTask(taskId: string): Promise<EditTask> {
+    const task = this.require(taskId);
+    if (task.revisions.length === 0) {
+      throw new Error("This task has no candidate to reject");
+    }
+    return this.terminateTask(taskId, "rejected", "Candidate rejected by user");
+  }
+
   async setState(
     taskId: string,
     taskState: EditTask["taskState"],
   ): Promise<EditTask> {
     const task = this.require(taskId);
+    if (TERMINAL_STATES.has(task.taskState) && task.taskState !== taskState) {
+      throw new Error(`Cannot change a task in state ${task.taskState}`);
+    }
     task.taskState = taskState;
     task.updatedAt = Date.now();
     await this.changed();
@@ -437,6 +460,41 @@ export class TaskService implements vscode.Disposable {
     if (!task) {
       throw new Error(`Unknown task: ${taskId}`);
     }
+    return task;
+  }
+
+  private ensureMutable(task: EditTask, action: string): void {
+    if (TERMINAL_STATES.has(task.taskState) || task.taskState === "applying") {
+      throw new Error(`Cannot ${action} a task in state ${task.taskState}`);
+    }
+  }
+
+  private async terminateTask(
+    taskId: string,
+    taskState: Extract<TerminalTaskState, "cancelled" | "rejected">,
+    message: string,
+  ): Promise<EditTask> {
+    const task = this.require(taskId);
+    if (task.taskState === taskState) {
+      return task;
+    }
+    this.ensureMutable(task, taskState === "rejected" ? "reject" : "cancel");
+    for (const instruction of task.instructions) {
+      if (
+        instruction.status === "pending" ||
+        instruction.status === "dispatching"
+      ) {
+        instruction.status = "failed";
+        instruction.lastError = message;
+        delete instruction.dispatcherId;
+        delete instruction.leaseUntil;
+      }
+    }
+    task.taskState = taskState;
+    task.progress = { stage: taskState, message };
+    delete task.clarification;
+    task.updatedAt = Date.now();
+    await this.changed();
     return task;
   }
 

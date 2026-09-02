@@ -16,20 +16,22 @@ Early MVP foundation:
 - stdio MCP server exposing connection/claim/read/search/progress/revision tools;
 - automatic dispatch through MCP Sampling, with read tools when the host supports them;
 - leased retries plus explicit retry for failed Agent dispatches;
-- explicit review and follow-up instructions on a task-local logical branch;
+- explicit diff, accept, reject, copy, retry, cancel, and follow-up review actions;
 - configurable conflict handling with rebase/regeneration or reviewed three-way merge.
 
-See [`docs/PRD.md`](docs/PRD.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/mcp-contract.md`](docs/mcp-contract.md).
+See [`docs/PRD.md`](docs/PRD.md), [`docs/architecture.md`](docs/architecture.md), [`docs/mcp-contract.md`](docs/mcp-contract.md), and the [`Pi setup guide`](docs/pi-setup.md).
 
 ## Install
 
-Download `anchor-agent-0.1.0.vsix` from the latest GitHub prerelease and install it:
+Download `anchor-agent-0.1.1.vsix` from the latest GitHub prerelease and install it:
 
 ```bash
-code --install-extension anchor-agent-0.1.0.vsix
+code --install-extension anchor-agent-0.1.1.vsix
 ```
 
-In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette and paste the copied JSON into your MCP host configuration. Then select text and run **Anchor Agent: Rewrite Selection** or press `Cmd+Shift+I` / `Ctrl+Shift+I`.
+In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette, choose your host, and save the copied JSON in its MCP configuration. For Pi, save it as `.mcp.json` or `~/.config/mcp/mcp.json`, then run `/reload`; the generated keep-alive configuration allows tasks created later to dispatch automatically. See the [Pi setup guide](docs/pi-setup.md).
+
+Then select text and run **Anchor Agent: Rewrite Selection** or press `Cmd+Shift+I` / `Ctrl+Shift+I`.
 
 This is an early prerelease. Back up important work and review every candidate before accepting it.
 

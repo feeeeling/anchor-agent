@@ -5,7 +5,10 @@ import { AnchorCodeLensProvider } from "./code-lenses.js";
 import { AnchorDecorations } from "./decorations.js";
 import { DIFF_SCHEME, DiffContentProvider } from "./diff-content.js";
 import { promptForInstruction } from "./instruction-panel.js";
-import { createMcpConfiguration } from "./mcp-config.js";
+import {
+  createMcpConfiguration,
+  type McpConfigurationTarget,
+} from "./mcp-config.js";
 import { TaskDetailsPanelManager } from "./task-details-panel.js";
 import { TaskService } from "./task-service.js";
 import { TaskTreeProvider } from "./task-tree.js";
@@ -64,6 +67,14 @@ export async function activate(
       (value?: unknown) => acceptTask(tasks, value),
     ),
     vscode.commands.registerCommand(
+      "anchorAgent.rejectTask",
+      (value?: unknown) => rejectTask(tasks, value),
+    ),
+    vscode.commands.registerCommand(
+      "anchorAgent.copyCandidate",
+      (value?: unknown) => copyCandidate(tasks, value),
+    ),
+    vscode.commands.registerCommand(
       "anchorAgent.continueTask",
       (value?: unknown) => continueTask(tasks, value),
     ),
@@ -76,12 +87,7 @@ export async function activate(
     ),
     vscode.commands.registerCommand(
       "anchorAgent.cancelTask",
-      async (value?: unknown) => {
-        const taskId = taskIdFrom(value);
-        if (taskId) {
-          await tasks.setState(taskId, "cancelled");
-        }
-      },
+      (value?: unknown) => cancelTask(tasks, value),
     ),
   );
 
@@ -95,19 +101,50 @@ export async function activate(
   }
 }
 
+interface McpConfigurationQuickPickItem extends vscode.QuickPickItem {
+  target: McpConfigurationTarget;
+}
+
 async function copyMcpConfiguration(
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  const selected =
+    await vscode.window.showQuickPick<McpConfigurationQuickPickItem>(
+      [
+        {
+          label: "Pi",
+          description: "Keep-alive connection with user-approved MCP Sampling",
+          target: "pi",
+        },
+        {
+          label: "Standard MCP host",
+          description: "Portable stdio server configuration",
+          target: "standard",
+        },
+      ],
+      { placeHolder: "Choose the MCP host configuration to copy" },
+    );
+  if (!selected) {
+    return;
+  }
   const serverPath = vscode.Uri.joinPath(
     context.extensionUri,
     "dist",
     "mcp-server.cjs",
   ).fsPath;
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const configuration = createMcpConfiguration(serverPath, workspacePath);
+  const configuration = createMcpConfiguration(
+    serverPath,
+    workspacePath,
+    selected.target,
+  );
   await vscode.env.clipboard.writeText(JSON.stringify(configuration, null, 2));
+  const nextStep =
+    selected.target === "pi"
+      ? "Save it as .mcp.json or ~/.config/mcp/mcp.json, then run /reload in Pi."
+      : "Paste it into your MCP host configuration and restart the host.";
   void vscode.window.showInformationMessage(
-    "Anchor Agent MCP configuration copied.",
+    `Anchor Agent MCP configuration copied. ${nextStep}`,
   );
 }
 
@@ -218,6 +255,59 @@ async function openDiffTask(
   );
 }
 
+async function copyCandidate(
+  tasks: TaskService,
+  value?: unknown,
+): Promise<void> {
+  const taskId = taskIdFrom(value);
+  const task = taskId ? tasks.get(taskId) : undefined;
+  const revision =
+    task?.revisions.find((item) => item.id === task.activeRevisionId) ??
+    task?.revisions.at(-1);
+  if (!revision) {
+    void vscode.window.showInformationMessage(
+      "No candidate revision is available yet.",
+    );
+    return;
+  }
+  await vscode.env.clipboard.writeText(revision.replacement);
+  void vscode.window.showInformationMessage("Candidate copied to clipboard.");
+}
+
+async function rejectTask(tasks: TaskService, value?: unknown): Promise<void> {
+  const taskId = taskIdFrom(value);
+  if (!taskId) {
+    return;
+  }
+  const choice = await vscode.window.showWarningMessage(
+    "Reject this candidate and close the task?",
+    { modal: true },
+    "Reject candidate",
+  );
+  if (choice !== "Reject candidate") {
+    return;
+  }
+  try {
+    await tasks.rejectTask(taskId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(message);
+  }
+}
+
+async function cancelTask(tasks: TaskService, value?: unknown): Promise<void> {
+  const taskId = taskIdFrom(value);
+  if (!taskId) {
+    return;
+  }
+  try {
+    await tasks.cancelTask(taskId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(message);
+  }
+}
+
 async function retryTask(tasks: TaskService, value?: unknown): Promise<void> {
   const taskId = taskIdFrom(value);
   if (!taskId) {
@@ -252,10 +342,15 @@ async function continueTask(
   if (!instruction?.trim()) {
     return;
   }
-  await tasks.continueTask(taskId, instruction.trim());
-  void vscode.window.showInformationMessage(
-    "Follow-up instruction queued for the connected agent.",
-  );
+  try {
+    await tasks.continueTask(taskId, instruction.trim());
+    void vscode.window.showInformationMessage(
+      "Follow-up instruction queued for the connected agent.",
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(message);
+  }
 }
 
 async function acceptTask(tasks: TaskService, value?: unknown): Promise<void> {
