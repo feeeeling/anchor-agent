@@ -119,6 +119,67 @@ describe("TaskService terminal review actions", () => {
       "This task has no candidate to reject",
     );
   });
+
+  it("keeps actionable failure errors across retries and clears on retryTask", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const instructionId = task.instructions[0]?.id;
+    if (!instructionId) {
+      throw new Error("Created task is missing its initial instruction");
+    }
+    const message =
+      "Sampling was rejected or not authorized. Approve the Sampling prompt in Pi.";
+
+    const firstClaim = await service.claimInstruction({
+      dispatcherId: "agent-1",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(firstClaim?.instruction.dispatchAttempts).toBe(1);
+    await service.failInstruction(instructionId, "agent-1", message);
+    let latest = service.get(task.id);
+    expect(latest?.taskState).toBe("queued");
+    expect(latest?.progress?.message).toBe(`${message} Automatic retry 1/3…`);
+    expect(latest?.instructions[0]?.lastError).toBe(message);
+
+    if (latest?.instructions[0]) {
+      latest.instructions[0].leaseUntil = Date.now() - 1;
+    }
+    const secondClaim = await service.claimInstruction({
+      dispatcherId: "agent-2",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(secondClaim?.instruction.dispatchAttempts).toBe(2);
+    await service.failInstruction(instructionId, "agent-2", message);
+    latest = service.get(task.id);
+    expect(latest?.taskState).toBe("queued");
+    expect(latest?.progress?.message).toBe(`${message} Automatic retry 2/3…`);
+    expect(latest?.instructions[0]?.lastError).toBe(message);
+
+    if (latest?.instructions[0]) {
+      latest.instructions[0].leaseUntil = Date.now() - 1;
+    }
+    const thirdClaim = await service.claimInstruction({
+      dispatcherId: "agent-3",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(thirdClaim?.instruction.dispatchAttempts).toBe(3);
+    await service.failInstruction(instructionId, "agent-3", message);
+    latest = service.get(task.id);
+    expect(latest?.taskState).toBe("failed");
+    expect(latest?.progress).toEqual({ stage: "failed", message });
+    expect(latest?.instructions[0]?.status).toBe("failed");
+    expect(latest?.instructions[0]?.lastError).toBe(message);
+
+    const retried = await service.retryTask(task.id);
+    expect(retried.id).toBe(instructionId);
+    expect(retried.status).toBe("pending");
+    expect(retried.dispatchAttempts).toBe(0);
+    expect(retried.lastError).toBeUndefined();
+    expect(service.get(task.id)?.taskState).toBe("created");
+  });
 });
 
 describe("TaskService clarification reply channel", () => {

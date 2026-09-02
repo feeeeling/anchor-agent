@@ -136,6 +136,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     panel: vscode.WebviewPanel,
     task: EditTask,
   ): Promise<void> {
+    const failedInstruction = latestFailedInstruction(task);
     const revision =
       task.revisions.find((item) => item.id === task.activeRevisionId) ??
       task.revisions.at(-1);
@@ -169,6 +170,9 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
           anchorState: task.anchorState,
           instruction: task.instruction,
           progress: task.progress?.message ?? "",
+          lastError: failedInstruction?.lastError ?? "",
+          showFailureError:
+            task.taskState === "failed" && Boolean(failedInstruction?.lastError),
           baseText: task.baseText,
           localText,
           currentDocumentVersion,
@@ -336,6 +340,12 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
   };
 }
 
+function latestFailedInstruction(task: EditTask) {
+  return [...task.instructions]
+    .reverse()
+    .find((instruction) => instruction.status === "failed");
+}
+
 function renderHtml(nonce: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -358,6 +368,10 @@ function renderHtml(nonce: string): string {
     button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
     button:disabled { cursor: default; opacity: .5; }
     #warnings, #error { color: var(--vscode-errorForeground); }
+    #failure { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-inputValidation-errorBackground, transparent); }
+    #failure.visible { display: block; }
+    #failure strong { display: block; margin-bottom: 4px; }
+    #failure-message { white-space: pre-wrap; }
     #stall { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-inputValidation-warningBackground, transparent); }
     #stall.visible { display: block; }
     #stall strong { display: block; margin-bottom: 4px; }
@@ -380,6 +394,10 @@ function renderHtml(nonce: string): string {
     <strong>Dispatch has not started</strong>
     <p class="muted" style="margin:0">No Agent has claimed this instruction yet. Check the following:</p>
     <ul id="stall-list"></ul>
+  </section>
+  <section id="failure" role="alert" aria-live="polite">
+    <strong>Last automatic dispatch failure</strong>
+    <p id="failure-message"></p>
   </section>
   <section><strong>Instruction</strong><div id="instruction"></div><div id="summary" class="muted"></div><div id="warnings"></div></section>
   <div class="grid">
@@ -450,6 +468,7 @@ function renderHtml(nonce: string): string {
       byId('status').textContent = task.taskState + ' / ' + task.anchorState;
       byId('meta').textContent = task.revisionCount + ' revisions · ' + task.instructionCount + ' instructions · document v' + task.currentDocumentVersion;
       byId('progress').textContent = task.progress;
+      byId('failure-message').textContent = task.lastError;
       byId('instruction').textContent = task.instruction;
       byId('summary').textContent = task.summary;
       byId('warnings').textContent = task.warnings.join('\\n');
@@ -509,6 +528,12 @@ function renderHtml(nonce: string): string {
         stall.classList.add('visible');
       } else {
         stall.classList.remove('visible');
+      }
+      const failure = byId('failure');
+      if (task.showFailureError && task.lastError) {
+        failure.classList.add('visible');
+      } else {
+        failure.classList.remove('visible');
       }
     });
     send('ready');
