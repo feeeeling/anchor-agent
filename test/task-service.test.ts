@@ -24,7 +24,10 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { TaskService } from "../src/task-service.js";
+import {
+  TaskService,
+  formatClarificationAnswerInstruction,
+} from "../src/task-service.js";
 
 class MemoryState {
   private tasks: unknown[] = [];
@@ -114,6 +117,86 @@ describe("TaskService terminal review actions", () => {
 
     await expect(service.rejectTask(task.id)).rejects.toThrow(
       "This task has no candidate to reject",
+    );
+  });
+});
+
+describe("TaskService clarification reply channel", () => {
+  it("reuses the open turn and resumes claim after the user answers", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const instruction = task.instructions[0];
+    if (!instruction) {
+      throw new Error("missing instruction");
+    }
+    await service.claimInstruction({
+      dispatcherId: "agent-1",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    await service.requestClarification(task.id, "Which tone?", [
+      "formal",
+      "casual",
+    ]);
+    expect(service.get(task.id)?.taskState).toBe("waitingForUser");
+    await expect(
+      service.claimInstruction({
+        dispatcherId: "agent-2",
+        leaseMs: 30_000,
+        taskId: task.id,
+      }),
+    ).resolves.toBeUndefined();
+
+    const pending = await service.answerClarification(task.id, "casual");
+    const updated = service.get(task.id);
+    expect(updated?.taskState).toBe("created");
+    expect(updated?.clarification).toBeUndefined();
+    expect(pending.id).toBe(instruction.id);
+    expect(pending.status).toBe("pending");
+    expect(pending.dispatchAttempts).toBe(0);
+    expect(pending.dispatcherId).toBeUndefined();
+    expect(pending.text).toContain("Question: Which tone?");
+    expect(pending.text).toContain("Options offered: formal | casual");
+    expect(pending.text).toContain("Answer: casual");
+    expect(updated?.instruction).toBe(pending.text);
+
+    const claim = await service.claimInstruction({
+      dispatcherId: "agent-2",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(claim?.instruction.id).toBe(instruction.id);
+    expect(claim?.instruction.text).toContain("Answer: casual");
+  });
+
+  it("creates a new pending turn when no open instruction remains", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const instruction = task.instructions[0];
+    if (!instruction) {
+      throw new Error("missing instruction");
+    }
+    await service.submitRevision(task.id, {
+      instructionId: instruction.id,
+      replacement: "Hello",
+    });
+    await service.requestClarification(task.id, "Keep the greeting?");
+    const pending = await service.answerClarification(task.id, "yes, keep it");
+    expect(pending.id).not.toBe(instruction.id);
+    expect(pending.status).toBe("pending");
+    expect(pending.parentRevisionId).toBe(task.revisions[0]?.id ?? service.get(task.id)?.activeRevisionId);
+    expect(pending.text).toContain("Answer: yes, keep it");
+  });
+
+  it("rejects empty answers and non-waiting tasks", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    await expect(service.answerClarification(task.id, "nope")).rejects.toThrow(
+      /not waiting/,
+    );
+    await service.requestClarification(task.id, "Need a choice?");
+    await expect(service.answerClarification(task.id, "   ")).rejects.toThrow(
+      /must not be empty/,
     );
   });
 });

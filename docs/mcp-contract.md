@@ -81,7 +81,11 @@ Creates an immutable candidate and completes the referenced pending instruction.
 
 Input: `{ taskId, question, options? }`
 
-Marks the task as waiting for user input. Interactive response transport is planned after the initial bridge.
+Marks the task as `waitingForUser` and stores the question (and optional choices) for the editor task-details panel. Instruction claiming is paused while the task waits.
+
+**User reply channel (instruction continuation):** the user answers in the task details UI. Anchor queues that answer as a pending instruction turn—reusing the open dispatching/pending turn when present—so the Agent receives it through `anchor.claim_task` or automatic sampling. The answer is not returned as a deferred `request_clarification` tool result.
+
+`anchor.get_task` exposes `clarification` and `taskState: "waitingForUser"` until the user replies.
 
 ## Automatic sampling
 

@@ -25,8 +25,10 @@ interface PanelMessage {
     | "openDiff"
     | "continue"
     | "retry"
-    | "cancel";
+    | "cancel"
+    | "answerClarification";
   instruction?: string;
+  answer?: string;
 }
 
 interface PanelEntry {
@@ -192,6 +194,12 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
             !TERMINAL_STATES.has(task.taskState) &&
             task.taskState !== "applying" &&
             task.instructions.some((item) => item.status === "failed"),
+          waitingForUser: task.taskState === "waitingForUser",
+          clarificationQuestion: task.clarification?.question ?? "",
+          clarificationOptions: task.clarification?.options ?? [],
+          canAnswerClarification:
+            task.taskState === "waitingForUser" &&
+            Boolean(task.clarification?.question),
           showStallHints,
           stallHints: showStallHints ? [...STALL_HINT_CHECKLIST] : [],
         },
@@ -242,6 +250,23 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       }
       return;
     }
+    if (message.type === "answerClarification") {
+      const answer = message.answer?.trim() ?? "";
+      if (!answer) {
+        await this.post(taskId, {
+          type: "validation",
+          message: "Enter an answer for the Agent.",
+        });
+        return;
+      }
+      try {
+        await this.tasks.answerClarification(taskId, answer);
+        await this.post(taskId, { type: "clarificationAnswered" });
+      } catch (error) {
+        await this.showError(taskId, error);
+      }
+      return;
+    }
     const instruction = message.instruction?.trim() ?? "";
     if (!instruction) {
       await this.post(taskId, {
@@ -282,6 +307,7 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
     "continue",
     "retry",
     "cancel",
+    "answerClarification",
   ];
   if (
     typeof candidate.type !== "string" ||
@@ -295,11 +321,18 @@ function decodeMessage(value: unknown): PanelMessage | undefined {
   ) {
     return undefined;
   }
+  if (
+    candidate.answer !== undefined &&
+    typeof candidate.answer !== "string"
+  ) {
+    return undefined;
+  }
   return {
     type: candidate.type as PanelMessage["type"],
     ...(typeof candidate.instruction === "string"
       ? { instruction: candidate.instruction }
       : {}),
+    ...(typeof candidate.answer === "string" ? { answer: candidate.answer } : {}),
   };
 }
 
@@ -330,6 +363,13 @@ function renderHtml(nonce: string): string {
     #stall strong { display: block; margin-bottom: 4px; }
     #stall ul { margin: 8px 0 0; padding-left: 1.2rem; }
     #stall li { margin: 4px 0; }
+    #clarification { display: none; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--vscode-focusBorder, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
+    #clarification.visible { display: block; }
+    #clarification strong { display: block; margin-bottom: 6px; }
+    #clarification-question { margin: 0 0 10px; white-space: pre-wrap; }
+    #clarification-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    #clarification-options button { padding: 4px 10px; }
+    #followup-section.hidden { display: none; }
     @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -355,10 +395,17 @@ function renderHtml(nonce: string): string {
     <button id="retry" class="secondary">Retry</button>
     <button id="cancel" class="secondary">Cancel task</button>
   </div>
-  <section>
+  <div id="error" role="alert" aria-live="polite"></div>
+  <section id="clarification" role="region" aria-label="Agent clarification">
+    <strong>Agent needs clarification</strong>
+    <p id="clarification-question"></p>
+    <div id="clarification-options" class="actions"></div>
+    <textarea id="clarification-answer" placeholder="Type your answer for the Agent."></textarea>
+    <div class="actions"><button id="send-clarification">Send answer to Agent</button></div>
+  </section>
+  <section id="followup-section">
     <strong>Continue refining</strong>
     <textarea id="followup" placeholder="Describe what to change in the next candidate."></textarea>
-    <div id="error" role="alert" aria-live="polite"></div>
     <div class="actions"><button id="continue">Send follow-up</button></div>
   </section>
   <script nonce="${nonce}">
@@ -379,10 +426,23 @@ function renderHtml(nonce: string): string {
         send('continue', { instruction: byId('followup').value });
       }
     });
+    const sendClarification = () => send('answerClarification', { answer: byId('clarification-answer').value });
+    byId('send-clarification').addEventListener('click', sendClarification);
+    byId('clarification-answer').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        sendClarification();
+      }
+    });
     window.addEventListener('message', (event) => {
       const message = event.data;
       if (message?.type === 'validation') { byId('error').textContent = message.message; return; }
       if (message?.type === 'continued') { byId('followup').value = ''; byId('error').textContent = ''; return; }
+      if (message?.type === 'clarificationAnswered') {
+        byId('clarification-answer').value = '';
+        byId('error').textContent = '';
+        return;
+      }
       if (message?.type !== 'task') return;
       currentTask = message.task;
       const task = currentTask;
@@ -402,8 +462,41 @@ function renderHtml(nonce: string): string {
       byId('diff').disabled = !task.hasCandidate;
       byId('retry').disabled = !task.canRetry;
       byId('cancel').disabled = !task.canContinue;
-      byId('continue').disabled = !task.canContinue;
-      byId('followup').disabled = !task.canContinue;
+      byId('continue').disabled = !task.canContinue || task.canAnswerClarification;
+      byId('followup').disabled = !task.canContinue || task.canAnswerClarification;
+      const followupSection = byId('followup-section');
+      if (task.canAnswerClarification) {
+        followupSection.classList.add('hidden');
+      } else {
+        followupSection.classList.remove('hidden');
+      }
+      const clarification = byId('clarification');
+      const clarificationOptions = byId('clarification-options');
+      clarificationOptions.replaceChildren();
+      if (task.canAnswerClarification) {
+        byId('clarification-question').textContent = task.clarificationQuestion;
+        byId('send-clarification').disabled = false;
+        byId('clarification-answer').disabled = false;
+        if (Array.isArray(task.clarificationOptions)) {
+          for (const option of task.clarificationOptions) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'secondary';
+            button.textContent = option;
+            button.addEventListener('click', () => {
+              byId('clarification-answer').value = option;
+              send('answerClarification', { answer: option });
+            });
+            clarificationOptions.appendChild(button);
+          }
+        }
+        clarification.classList.add('visible');
+      } else {
+        byId('clarification-question').textContent = '';
+        byId('send-clarification').disabled = true;
+        byId('clarification-answer').disabled = true;
+        clarification.classList.remove('visible');
+      }
       const stall = byId('stall');
       const stallList = byId('stall-list');
       stallList.replaceChildren();
