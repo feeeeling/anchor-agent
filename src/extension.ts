@@ -86,6 +86,10 @@ export async function activate(
       (value?: unknown) => continueTask(tasks, value),
     ),
     vscode.commands.registerCommand(
+      "anchorAgent.answerClarification",
+      (value?: unknown) => answerClarification(tasks, value),
+    ),
+    vscode.commands.registerCommand(
       "anchorAgent.retryTask",
       (value?: unknown) => retryTask(tasks, value),
     ),
@@ -516,6 +520,44 @@ async function continueTask(
     await tasks.continueTask(taskId, instruction.trim());
     void vscode.window.showInformationMessage(
       "Follow-up instruction queued for the connected agent.",
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(message);
+  }
+}
+
+async function answerClarification(
+  tasks: TaskService,
+  value?: unknown,
+): Promise<void> {
+  const taskId = taskIdFrom(value);
+  const task = taskId ? tasks.get(taskId) : undefined;
+  if (!taskId || !task) {
+    void vscode.window.showErrorMessage(
+      "Select an existing Anchor Agent task first.",
+    );
+    return;
+  }
+  if (task.taskState !== "waitingForUser" || !task.clarification) {
+    void vscode.window.showErrorMessage(
+      "This task is not waiting for a clarification answer.",
+    );
+    return;
+  }
+  const answer = await vscode.window.showInputBox({
+    title: "Answer Agent clarification",
+    prompt: task.clarification.question,
+    placeHolder: task.clarification.options?.join(" / ") || "Your answer",
+    ignoreFocusOut: true,
+  });
+  if (!answer?.trim()) {
+    return;
+  }
+  try {
+    await tasks.answerClarification(taskId, answer.trim());
+    void vscode.window.showInformationMessage(
+      "Clarification answer queued for the connected agent.",
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
