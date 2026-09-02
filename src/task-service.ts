@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
+import { releaseInFlightDispatchLeases } from "./task-recovery.js";
 import { transformAnchor } from "./anchor-range.js";
 import { sha256 } from "./hash.js";
 import { newLogicalBranchId } from "./session-branch.js";
@@ -41,6 +42,7 @@ export class TaskService implements vscode.Disposable {
   readonly onDidChange = this.changeEmitter.event;
 
   constructor(private readonly state: vscode.Memento) {
+    let shouldPersist = false;
     for (const task of state.get<EditTask[]>(STORAGE_KEY, [])) {
       if (!Array.isArray((task as { instructions?: unknown }).instructions)) {
         task.instructions = [
@@ -53,11 +55,18 @@ export class TaskService implements vscode.Disposable {
             createdAt: task.createdAt,
           },
         ];
+        shouldPersist = true;
       }
       for (const instruction of task.instructions) {
         instruction.dispatchAttempts ??= 0;
       }
+      if (releaseInFlightDispatchLeases(task)) {
+        shouldPersist = true;
+      }
       this.tasks.set(task.id, task);
+    }
+    if (shouldPersist) {
+      void this.changed();
     }
   }
 
@@ -69,6 +78,31 @@ export class TaskService implements vscode.Disposable {
 
   get(taskId: string): EditTask | undefined {
     return this.tasks.get(taskId);
+  }
+
+  handleDocumentClosed(documentUri: string): EditTask[] {
+    return this.list().filter((task) => task.documentUri === documentUri);
+  }
+
+  listContinuable(): EditTask[] {
+    return this.list().filter((task) => {
+      if (TERMINAL_STATES.has(task.taskState) || task.taskState === "orphaned") {
+        return false;
+      }
+      if (
+        task.taskState === "waitingForUser" ||
+        task.taskState === "ready" ||
+        task.taskState === "conflicted"
+      ) {
+        return true;
+      }
+      return task.instructions.some(
+        (instruction) =>
+          instruction.status === "pending" ||
+          instruction.status === "dispatching" ||
+          instruction.status === "failed",
+      );
+    });
   }
 
   async create(

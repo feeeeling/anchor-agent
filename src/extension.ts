@@ -59,6 +59,9 @@ export async function activate(
         })),
       );
     }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      tasks.handleDocumentClosed(document.uri.toString());
+    }),
     vscode.commands.registerCommand("anchorAgent.createTask", () =>
       createTask(tasks, details),
     ),
@@ -111,6 +114,9 @@ export async function activate(
     );
   }
 }
+
+/** TaskService persists task state through workspaceState updates. */
+export function deactivate(): void {}
 
 interface McpConfigurationQuickPickItem extends vscode.QuickPickItem {
   target: McpConfigurationTarget;
