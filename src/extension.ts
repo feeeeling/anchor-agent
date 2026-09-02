@@ -1,26 +1,24 @@
 import * as vscode from "vscode";
-import { transformAnchor } from "./anchor-range.js";
 import { BridgeServer } from "./bridge-server.js";
 import { AnchorCodeLensProvider } from "./code-lenses.js";
 import { AnchorDecorations } from "./decorations.js";
 import { DIFF_SCHEME, DiffContentProvider } from "./diff-content.js";
-import { promptForInstruction } from "./instruction-panel.js";
 import {
-  buildMcpConfigDiffPreview,
-  createMcpConfiguration,
-  mergeMcpConfiguration,
-  parseMcpConfigurationText,
-  serializeMcpConfiguration,
-  type McpConfigurationTarget,
-  type McpHostConfiguration,
-} from "./mcp-config.js";
-import * as os from "node:os";
-import * as path from "node:path";
+  acceptTask,
+  answerClarification,
+  cancelTask,
+  continueTask,
+  copyCandidate,
+  copyMcpConfiguration,
+  createTask,
+  openDiffTask,
+  rejectTask,
+  retryTask,
+  showTaskDetails,
+} from "./extension-commands.js";
 import { TaskDetailsPanelManager } from "./task-details-panel.js";
 import { TaskService } from "./task-service.js";
 import { TaskTreeProvider } from "./task-tree.js";
-import { threeWayMerge } from "./three-way-merge.js";
-import type { AnchorSpan } from "./types.js";
 
 export async function activate(
   context: vscode.ExtensionContext,
