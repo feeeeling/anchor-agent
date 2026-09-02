@@ -43,6 +43,8 @@ Under `regenerateOnChange`, the extension rebases the immutable task snapshot an
 
 The initial instruction uses a CSP-restricted Webview textarea. A temporary in-memory anchor follows document changes while this dialog is open, so edits before the selection do not invalidate task creation. The task-details Webview receives state through `postMessage`, renders task values with `textContent`, and shows Base, current Local, and Candidate text. Review actions are accept, reject, copy, Diff, retry, cancel, and multiline follow-up. Rejecting or cancelling a task is terminal: pending instruction leases are invalidated, and later Agent progress or revisions are refused.
 
+The **Anchor Agent Tasks** tree view right-click menu wires the same review commands (`openDiff`, `copyCandidate`, `rejectTask`, `cancelTask`). Menu visibility uses TreeItem `contextValue` flags (`hasCandidate`, `cancellable`, `rejectable`) that mirror panel `canAccept` / `canReject` style gates.
+
 ## Stable and current reads
 
 The task-time full document snapshot is immutable and supports reproducible agent reasoning. A current read reflects unsaved editor contents and returns the current document version. Candidate revisions record the version on which they were based.
