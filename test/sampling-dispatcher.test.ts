@@ -130,4 +130,34 @@ describe("SamplingDispatcher", () => {
     };
     expect(secondRequest.messages.at(-1)?.role).toBe("user");
   });
+
+  it("posts an actionable fail message when sampling is rejected", async () => {
+    const claim = fixture();
+    let failBody: Record<string, unknown> | undefined;
+    const bridge = {
+      request: vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/v1/dispatch/claim") {
+          return { claim, autoDispatch: true, maxTokens: 2048 };
+        }
+        if (path.endsWith("/progress")) {
+          return {};
+        }
+        if (path.includes("/fail")) {
+          failBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return {};
+        }
+        throw new Error(`Unexpected bridge path: ${path}`);
+      }),
+    } as unknown as McpBridgeClient;
+    const createMessage = vi.fn(async () => {
+      throw new Error("User rejected sampling request");
+    });
+    const server = { server: { createMessage } } as unknown as McpServer;
+    const dispatcher = new SamplingDispatcher(server, bridge, "dispatcher-1");
+
+    await expect(dispatcher.dispatchNext(false)).resolves.toBe("dispatched");
+    expect(failBody?.dispatcherId).toBe("dispatcher-1");
+    expect(String(failBody?.message)).toMatch(/Approve the Sampling prompt/i);
+    expect(String(failBody?.message)).toMatch(/Retry|claim_task/i);
+  });
 });
