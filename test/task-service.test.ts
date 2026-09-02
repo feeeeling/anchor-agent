@@ -8,7 +8,7 @@ vi.mock("vscode", () => ({
       return { dispose: () => undefined };
     };
     fire(value: T): void {
-      for (the listener of this.listeners) {
+      for (const listener of this.listeners) {
         listener(value);
       }
     }
