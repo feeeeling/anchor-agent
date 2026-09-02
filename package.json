@@ -26,11 +26,13 @@
   "engines": {
     "vscode": "^1.95.0"
   },
+  "icon": "media/icon.png",
   "main": "./dist/extension.cjs",
   "bin": {
     "anchor-agent-mcp": "./dist/mcp-server.cjs"
   },
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:anchorAgent.createTask",
     "onView:anchorAgent.tasks"
   ],
