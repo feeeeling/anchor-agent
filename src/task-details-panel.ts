@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
+import {
+  STALL_HINT_CHECKLIST,
+  isDispatchNeverStarted,
+  shouldShowStallHints,
+  stallHintDelayRemaining,
+} from "./stall-hints.js";
 import type { TaskService } from "./task-service.js";
 import type { EditTask } from "./types.js";
 
@@ -23,8 +29,13 @@ interface PanelMessage {
   instruction?: string;
 }
 
+interface PanelEntry {
+  panel: vscode.WebviewPanel;
+  stallTimer: NodeJS.Timeout | undefined;
+}
+
 export class TaskDetailsPanelManager implements vscode.Disposable {
-  private readonly panels = new Map<string, vscode.WebviewPanel>();
+  private readonly panels = new Map<string, PanelEntry>();
   private readonly subscription: vscode.Disposable;
 
   constructor(private readonly tasks: TaskService) {
@@ -39,8 +50,8 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     }
     const existing = this.panels.get(taskId);
     if (existing) {
-      existing.reveal(vscode.ViewColumn.Beside, false);
-      void this.update(existing, task);
+      existing.panel.reveal(vscode.ViewColumn.Beside, false);
+      void this.update(existing.panel, task);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -51,8 +62,11 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     );
     const nonce = randomBytes(16).toString("base64url");
     panel.webview.html = renderHtml(nonce);
-    this.panels.set(taskId, panel);
-    panel.onDidDispose(() => this.panels.delete(taskId));
+    this.panels.set(taskId, { panel, stallTimer: undefined });
+    panel.onDidDispose(() => {
+      this.clearStallTimer(taskId);
+      this.panels.delete(taskId);
+    });
     panel.webview.onDidReceiveMessage((value: unknown) => {
       void this.handleMessage(taskId, value);
     });
@@ -61,21 +75,59 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
 
   dispose(): void {
     this.subscription.dispose();
-    for (const panel of this.panels.values()) {
-      panel.dispose();
+    for (const taskId of [...this.panels.keys()]) {
+      this.clearStallTimer(taskId);
+    }
+    for (const entry of this.panels.values()) {
+      entry.panel.dispose();
     }
     this.panels.clear();
   }
 
   private refresh(): void {
-    for (const [taskId, panel] of this.panels) {
+    for (const [taskId, entry] of this.panels) {
       const task = this.tasks.get(taskId);
       if (task) {
-        void this.update(panel, task);
+        void this.update(entry.panel, task);
       } else {
-        panel.dispose();
+        this.clearStallTimer(taskId);
+        entry.panel.dispose();
       }
     }
+  }
+
+  private clearStallTimer(taskId: string): void {
+    const entry = this.panels.get(taskId);
+    if (!entry?.stallTimer) {
+      return;
+    }
+    clearTimeout(entry.stallTimer);
+    entry.stallTimer = undefined;
+  }
+
+  private scheduleStallRefresh(taskId: string, task: EditTask): void {
+    const entry = this.panels.get(taskId);
+    if (!entry) {
+      return;
+    }
+    this.clearStallTimer(taskId);
+    if (!isDispatchNeverStarted(task)) {
+      return;
+    }
+    const remaining = stallHintDelayRemaining(task);
+    if (remaining === undefined || remaining === 0) {
+      return;
+    }
+    entry.stallTimer = setTimeout(() => {
+      const current = this.panels.get(taskId);
+      const latest = this.tasks.get(taskId);
+      if (!current || !latest) {
+        return;
+      }
+      current.stallTimer = undefined;
+      void this.update(current.panel, latest);
+    }, remaining);
+    entry.stallTimer.unref?.();
   }
 
   private async update(
@@ -103,6 +155,8 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     if (!this.panels.has(task.id)) {
       return;
     }
+    this.scheduleStallRefresh(task.id, task);
+    const showStallHints = shouldShowStallHints(task);
     try {
       await panel.webview.postMessage({
         type: "task",
@@ -138,6 +192,8 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
             !TERMINAL_STATES.has(task.taskState) &&
             task.taskState !== "applying" &&
             task.instructions.some((item) => item.status === "failed"),
+          showStallHints,
+          stallHints: showStallHints ? [...STALL_HINT_CHECKLIST] : [],
         },
       });
     } catch {
@@ -151,10 +207,10 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       return;
     }
     if (message.type === "ready") {
-      const panel = this.panels.get(taskId);
+      const entry = this.panels.get(taskId);
       const task = this.tasks.get(taskId);
-      if (panel && task) {
-        void this.update(panel, task);
+      if (entry && task) {
+        void this.update(entry.panel, task);
       }
       return;
     }
@@ -208,7 +264,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
   }
 
   private async post(taskId: string, message: unknown): Promise<void> {
-    await this.panels.get(taskId)?.webview.postMessage(message);
+    await this.panels.get(taskId)?.panel.webview.postMessage(message);
   }
 }
 
@@ -269,12 +325,22 @@ function renderHtml(nonce: string): string {
     button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
     button:disabled { cursor: default; opacity: .5; }
     #warnings, #error { color: var(--vscode-errorForeground); }
+    #stall { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-inputValidation-warningBackground, transparent); }
+    #stall.visible { display: block; }
+    #stall strong { display: block; margin-bottom: 4px; }
+    #stall ul { margin: 8px 0 0; padding-left: 1.2rem; }
+    #stall li { margin: 4px 0; }
     @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <header><div><h1 id="title">Anchor Agent task</h1><div id="meta" class="muted"></div></div><span id="status">loading</span></header>
   <p id="progress" class="muted"></p>
+  <section id="stall" role="status" aria-live="polite">
+    <strong>Dispatch has not started</strong>
+    <p class="muted" style="margin:0">No Agent has claimed this instruction yet. Check the following:</p>
+    <ul id="stall-list"></ul>
+  </section>
   <section><strong>Instruction</strong><div id="instruction"></div><div id="summary" class="muted"></div><div id="warnings"></div></section>
   <div class="grid">
     <section><strong>Base</strong><pre id="base"></pre></section>
@@ -326,7 +392,7 @@ function renderHtml(nonce: string): string {
       byId('progress').textContent = task.progress;
       byId('instruction').textContent = task.instruction;
       byId('summary').textContent = task.summary;
-      byId('warnings').textContent = task.warnings.join('\n');
+      byId('warnings').textContent = task.warnings.join('\\n');
       byId('base').textContent = task.baseText;
       byId('local').textContent = task.localText;
       byId('candidate').textContent = task.candidate || 'No candidate yet.';
@@ -338,6 +404,19 @@ function renderHtml(nonce: string): string {
       byId('cancel').disabled = !task.canContinue;
       byId('continue').disabled = !task.canContinue;
       byId('followup').disabled = !task.canContinue;
+      const stall = byId('stall');
+      const stallList = byId('stall-list');
+      stallList.replaceChildren();
+      if (task.showStallHints && Array.isArray(task.stallHints) && task.stallHints.length) {
+        for (const hint of task.stallHints) {
+          const item = document.createElement('li');
+          item.textContent = hint;
+          stallList.appendChild(item);
+        }
+        stall.classList.add('visible');
+      } else {
+        stall.classList.remove('visible');
+      }
     });
     send('ready');
   </script>
