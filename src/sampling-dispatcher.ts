@@ -8,6 +8,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { McpBridgeClient } from "./mcp-bridge-client.js";
+import { formatSamplingFailure } from "./sampling-errors.js";
 import type { EditTask, TaskInstruction } from "./types.js";
 
 interface DispatchClaim {
@@ -158,7 +159,7 @@ export class SamplingDispatcher {
         },
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatSamplingFailure(error);
       await this.bridge.request(
         `/v1/dispatch/instructions/${encodeURIComponent(claim.instruction.id)}/fail`,
         {
