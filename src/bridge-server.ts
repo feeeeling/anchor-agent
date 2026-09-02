@@ -6,6 +6,13 @@ import {
   type ServerResponse,
 } from "node:http";
 import * as vscode from "vscode";
+import {
+  isBranchBindRequest,
+  isDispatchClaimRequest,
+  isDispatchFailureRequest,
+  isSearchRequest,
+  matchBridgeRoute,
+} from "./bridge-routes.js";
 import { ExtensionConnectionRegistry } from "./extension-connection-registry.js";
 import type { ClaimInstructionRequest, TaskService } from "./task-service.js";
 import type { Revision, TaskProgress } from "./types.js";
@@ -63,21 +70,9 @@ export class BridgeServer implements vscode.Disposable {
         return;
       }
       const url = new URL(request.url ?? "/", this.endpoint);
-      const taskMatch = /^\/v1\/tasks\/([^/]+)$/.exec(url.pathname);
-      const progressMatch = /^\/v1\/tasks\/([^/]+)\/progress$/.exec(
-        url.pathname,
-      );
-      const revisionsMatch = /^\/v1\/tasks\/([^/]+)\/revisions$/.exec(
-        url.pathname,
-      );
-      const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(
-        url.pathname,
-      );
-      const branchMatch = /^\/v1\/tasks\/([^/]+)\/branch$/.exec(url.pathname);
-      const dispatchFailureMatch =
-        /^\/v1\/dispatch\/instructions\/([^/]+)\/fail$/.exec(url.pathname);
+      const route = matchBridgeRoute(request.method ?? "GET", url.pathname);
 
-      if (request.method === "POST" && url.pathname === "/v1/dispatch/claim") {
+      if (route.kind === "claim") {
         const body = await this.readBody(request);
         if (!isDispatchClaimRequest(body)) {
           throw new Error("dispatcherId, leaseMs, and mode are required");
@@ -106,27 +101,27 @@ export class BridgeServer implements vscode.Disposable {
         });
         return;
       }
-      if (request.method === "POST" && dispatchFailureMatch?.[1]) {
+      if (route.kind === "dispatchFail") {
         const body = await this.readBody(request);
         if (!isDispatchFailureRequest(body)) {
           throw new Error("dispatcherId and message are required");
         }
         await this.tasks.failInstruction(
-          decodeURIComponent(dispatchFailureMatch[1]),
+          route.instructionId,
           body.dispatcherId,
           body.message,
         );
         this.json(response, 200, { ok: true });
         return;
       }
-      if (request.method === "GET" && url.pathname === "/v1/tasks") {
+      if (route.kind === "listTasks") {
         this.json(response, 200, {
           tasks: this.tasks.list().map((task) => this.tasks.publicView(task)),
         });
         return;
       }
-      if (request.method === "GET" && taskMatch?.[1]) {
-        const task = this.tasks.get(decodeURIComponent(taskMatch[1]));
+      if (route.kind === "getTask") {
+        const task = this.tasks.get(route.taskId);
         if (!task) {
           this.json(response, 404, { error: "Task not found" });
           return;
@@ -134,54 +129,48 @@ export class BridgeServer implements vscode.Disposable {
         this.json(response, 200, this.tasks.publicView(task));
         return;
       }
-      if (request.method === "GET" && url.pathname === "/v1/documents") {
+      if (route.kind === "documents") {
         await this.readDocument(url, response);
         return;
       }
-      if (request.method === "POST" && url.pathname === "/v1/search") {
+      if (route.kind === "search") {
         await this.searchWorkspace(await this.readBody(request), response);
         return;
       }
-      if (request.method === "POST" && branchMatch?.[1]) {
+      if (route.kind === "bindBranch") {
         const body = await this.readBody(request);
         if (!isBranchBindRequest(body)) {
           throw new Error("branchMode must be native or logical");
         }
-        const task = await this.tasks.bindBranch(
-          decodeURIComponent(branchMatch[1]),
-          body,
-        );
+        const task = await this.tasks.bindBranch(route.taskId, body);
         this.json(response, 200, this.tasks.publicView(task));
         return;
       }
-      if (request.method === "POST" && progressMatch?.[1]) {
+      if (route.kind === "progress") {
         const task = await this.tasks.reportProgress(
-          decodeURIComponent(progressMatch[1]),
+          route.taskId,
           await this.readBody<TaskProgress>(request),
         );
         this.json(response, 200, this.tasks.publicView(task));
         return;
       }
-      if (request.method === "POST" && revisionsMatch?.[1]) {
+      if (route.kind === "revisions") {
         const body = await this.readBody<
           Omit<Revision, "id" | "createdAt" | "warnings"> & {
             warnings?: string[];
           }
         >(request);
-        const revision = await this.tasks.submitRevision(
-          decodeURIComponent(revisionsMatch[1]),
-          body,
-        );
+        const revision = await this.tasks.submitRevision(route.taskId, body);
         this.json(response, 201, revision);
         return;
       }
-      if (request.method === "POST" && clarificationMatch?.[1]) {
+      if (route.kind === "clarification") {
         const body = await this.readBody<{
           question: string;
           options?: string[];
         }>(request);
         const task = await this.tasks.requestClarification(
-          decodeURIComponent(clarificationMatch[1]),
+          route.taskId,
           body.question,
           body.options,
         );
@@ -335,67 +324,4 @@ export class BridgeServer implements vscode.Disposable {
     });
     response.end(JSON.stringify(body));
   }
-}
-
-function isDispatchClaimRequest(value: unknown): value is {
-  dispatcherId: string;
-  leaseMs: number;
-  mode: "auto" | "manual";
-  taskId?: string;
-  sourceSessionId?: string;
-  sourceNodeId?: string;
-  branchMode?: "native" | "logical";
-} {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.dispatcherId === "string" &&
-    typeof candidate.leaseMs === "number" &&
-    (candidate.mode === "auto" || candidate.mode === "manual")
-  );
-}
-
-function isBranchBindRequest(value: unknown): value is {
-  branchMode: "native" | "logical";
-  sourceSessionId?: string;
-  sourceNodeId?: string;
-} {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return (
-    candidate.branchMode === "native" || candidate.branchMode === "logical"
-  );
-}
-
-function isDispatchFailureRequest(value: unknown): value is {
-  dispatcherId: string;
-  message: string;
-} {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.dispatcherId === "string" &&
-    typeof candidate.message === "string"
-  );
-}
-
-function isSearchRequest(value: unknown): value is {
-  taskId: string;
-  query: string;
-  include?: string;
-  maxResults?: number;
-} {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.taskId === "string" && typeof candidate.query === "string"
-  );
 }
