@@ -5,6 +5,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { McpBridgeClient } from "./mcp-bridge-client.js";
 import { SamplingDispatcher } from "./sampling-dispatcher.js";
+import {
+  claimFieldsFromBinding,
+  configureSessionForkCapability,
+  ensureTaskBranch,
+  getConfiguredSessionForkCapability,
+  resolveSessionForkCapability,
+} from "./session-branch.js";
+
+// Hosts may call configureSessionForkCapability() with a native fork RPC.
+// Env alone only supplies current session/node IDs when a fork function is also injected.
+configureSessionForkCapability(resolveSessionForkCapability());
 
 const server = new McpServer({ name: "anchor-agent", version: "0.1.0" });
 const bridge = new McpBridgeClient();
@@ -48,23 +59,102 @@ server.registerTool(
   "anchor.claim_task",
   {
     description:
-      "Claim a pending task instruction in the current Agent conversation. Use this when automatic sampling is unavailable.",
+      "Claim a pending task instruction in the current Agent conversation. Use this when automatic sampling is unavailable. Optional sourceSessionId/sourceNodeId associate the logical Anchor branch with host context; when a native session-fork adapter is configured, Anchor forks from the current node instead of inventing IDs. Task results are never written back to the parent conversation.",
     inputSchema: {
       taskId: z.string().optional(),
       sourceSessionId: z.string().optional(),
       sourceNodeId: z.string().optional(),
     },
   },
-  async (input) =>
-    toolCall("/v1/dispatch/claim", {
-      method: "POST",
-      body: JSON.stringify({
-        ...input,
-        dispatcherId,
-        leaseMs: 120_000,
-        mode: "manual",
-      }),
-    }),
+  async (input) => {
+    try {
+      // Claim with optional logical association IDs first. Native fork attaches
+      // only after a successful claim so idle claims do not create orphan sessions.
+      const capability = getConfiguredSessionForkCapability();
+      const claimResult = await bridge.request<{
+        claim: {
+          task: {
+            id: string;
+            branchId: string;
+            sourceSessionId?: string;
+            sourceNodeId?: string;
+            branchMode?: "native" | "logical";
+          };
+        } | null;
+      }>("/v1/dispatch/claim", {
+        method: "POST",
+        body: JSON.stringify({
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          ...(input.sourceSessionId
+            ? { sourceSessionId: input.sourceSessionId }
+            : {}),
+          ...(input.sourceNodeId ? { sourceNodeId: input.sourceNodeId } : {}),
+          branchMode: "logical",
+          dispatcherId,
+          leaseMs: 120_000,
+          mode: "manual",
+        }),
+      });
+      if (claimResult.claim) {
+        const bound = await ensureTaskBranch({
+          hasNativeFork: capability.hasNativeFork,
+          ...(capability.forkFromCurrentNode
+            ? { forkFromCurrentNode: capability.forkFromCurrentNode }
+            : {}),
+          ...(capability.currentSessionId
+            ? { currentSessionId: capability.currentSessionId }
+            : {}),
+          ...(capability.currentNodeId
+            ? { currentNodeId: capability.currentNodeId }
+            : {}),
+          existing: {
+            branchId: claimResult.claim.task.branchId,
+            ...(claimResult.claim.task.sourceSessionId
+              ? { sourceSessionId: claimResult.claim.task.sourceSessionId }
+              : {}),
+            ...(claimResult.claim.task.sourceNodeId
+              ? { sourceNodeId: claimResult.claim.task.sourceNodeId }
+              : {}),
+            ...(claimResult.claim.task.branchMode
+              ? { branchMode: claimResult.claim.task.branchMode }
+              : {}),
+          },
+          requested: {
+            ...(input.sourceSessionId
+              ? { sourceSessionId: input.sourceSessionId }
+              : {}),
+            ...(input.sourceNodeId ? { sourceNodeId: input.sourceNodeId } : {}),
+          },
+        });
+        const fields = claimFieldsFromBinding(bound);
+        await bridge.request(
+          `/v1/tasks/${encodeURIComponent(claimResult.claim.task.id)}/branch`,
+          {
+            method: "POST",
+            body: JSON.stringify(fields),
+          },
+        );
+        claimResult.claim.task.branchMode = bound.mode;
+        if (bound.sourceSessionId) {
+          claimResult.claim.task.sourceSessionId = bound.sourceSessionId;
+        }
+        if (bound.sourceNodeId) {
+          claimResult.claim.task.sourceNodeId = bound.sourceNodeId;
+        }
+      }
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify(claimResult) },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: message }],
+      };
+    }
+  },
 );
 
 server.registerTool(

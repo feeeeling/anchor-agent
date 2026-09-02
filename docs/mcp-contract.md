@@ -20,7 +20,7 @@ No input. Returns tasks exposed by the active VS Code window so an agent or adap
 
 Input: `{ taskId?, sourceSessionId?, sourceNodeId? }`
 
-Claims the oldest pending instruction, or one from `taskId`, with an expiring lease. Use this from the current Agent conversation when the host does not support automatic MCP Sampling. Optional source IDs associate the logical Anchor branch with native host context.
+Claims the oldest pending instruction, or one from `taskId`, with an expiring lease. Use this from the current Agent conversation when the host does not support automatic MCP Sampling. Optional source IDs associate the logical Anchor branch with native host context. When a host adapter has configured native session fork, automatic dispatch / claim may bind `branchMode: "native"` to a forked session/node; otherwise `branchMode: "logical"` keeps task-local history only. Task results are never written back to the parent conversation.
 
 ## `anchor.get_task`
 
@@ -92,6 +92,8 @@ Marks the task as `waitingForUser` and stores the question (and optional choices
 After MCP initialization, the stdio server checks client capabilities. A client with `sampling/createMessage` receives pending instructions automatically. When `sampling.tools` is also available, the model may call read-document and search-workspace during the sampling loop. Invalid output or rejected sampling is retried with a lease-backed exponential delay, up to three attempts.
 
 Sampling without tool support receives only the selected Base text and task-local revision history. Basic MCP clients remain usable through `anchor.claim_task`.
+
+Automatic sampling attaches branch metadata through the session-fork adapter: native fork from the current node when the host injected `NativeSessionFork`, otherwise the logical `branchId` history. Sampling uses `includeContext: "none"` and never writes completion summaries into the parent conversation.
 
 ## Explicit exclusions
 

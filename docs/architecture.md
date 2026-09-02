@@ -63,3 +63,12 @@ MCP standardizes tools and resources, not universal agent invocation or conversa
 The MCP process polls for pending instructions only after the host advertises sampling. Claims have expiring leases so multiple clients cannot process the same turn. Failures back off and retry three times; the final failure stores a user-actionable `lastError` / progress message (approve Sampling, fix MCP, Retry, or claim manually) so the task does not appear stuck in `created`. A sampling host without tool support sees only the selected text; one with sampling tools may read the task snapshot/current file and search the workspace through the extension.
 
 Missing native branching degrades to persisted task-local instruction/revision history without changing the editor UX. Sampling itself does not expose the active host conversation ancestry.
+
+## Session branching adapter
+
+`src/session-branch.ts` decides native fork vs logical branch after a successful claim:
+
+1. **Native** — when a host adapter injects `NativeSessionFork` plus the current session/node, Anchor forks from that node and stores `sourceSessionId`, `sourceNodeId`, and `branchMode: "native"` on the task.
+2. **Logical** — otherwise the task keeps its `branchId` and instruction/revision history. Optional claim-time source IDs may associate host context; Anchor never invents fake native IDs.
+
+Task results and completion summaries are **not** written back to the parent conversation. Sampling submits candidates only through Anchor revision APIs. See ADR 0004.

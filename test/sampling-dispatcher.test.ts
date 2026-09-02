@@ -2,6 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it, vi } from "vitest";
 import type { McpBridgeClient } from "../src/mcp-bridge-client.js";
 import { SamplingDispatcher } from "../src/sampling-dispatcher.js";
+import {
+  createPiSessionForkCapability,
+  type NativeSessionFork,
+} from "../src/session-branch.js";
 import type { EditTask, TaskInstruction } from "../src/types.js";
 
 function fixture() {
@@ -47,7 +51,7 @@ describe("SamplingDispatcher", () => {
         if (path === "/v1/dispatch/claim") {
           return { claim, autoDispatch: true, maxTokens: 2048 };
         }
-        if (path.endsWith("/progress")) {
+        if (path.endsWith("/progress") || path.endsWith("/branch")) {
           return {};
         }
         if (path.endsWith("/revisions")) {
@@ -84,7 +88,11 @@ describe("SamplingDispatcher", () => {
       if (path === "/v1/dispatch/claim") {
         return { claim, autoDispatch: true, maxTokens: 2048 };
       }
-      if (path.endsWith("/progress") || path.endsWith("/revisions")) {
+      if (
+        path.endsWith("/progress") ||
+        path.endsWith("/revisions") ||
+        path.endsWith("/branch")
+      ) {
         return {};
       }
       if (path.startsWith("/v1/documents?")) {
@@ -139,7 +147,7 @@ describe("SamplingDispatcher", () => {
         if (path === "/v1/dispatch/claim") {
           return { claim, autoDispatch: true, maxTokens: 2048 };
         }
-        if (path.endsWith("/progress")) {
+        if (path.endsWith("/progress") || path.endsWith("/branch")) {
           return {};
         }
         if (path.includes("/fail")) {
@@ -160,4 +168,140 @@ describe("SamplingDispatcher", () => {
     expect(String(failBody?.message)).toMatch(/Approve the Sampling prompt/i);
     expect(String(failBody?.message)).toMatch(/Retry|claim_task/i);
   });
+
+  it("attaches native fork metadata after claim when the host adapter supports it", async () => {
+    const claim = fixture();
+    let branchBody: Record<string, unknown> | undefined;
+    const nativeFork: NativeSessionFork = vi.fn(async () => ({
+      sessionId: "fork-session",
+      nodeId: "fork-node",
+    }));
+    const bridge = {
+      request: vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/v1/dispatch/claim") {
+          return { claim, autoDispatch: true, maxTokens: 2048 };
+        }
+        if (path.endsWith("/branch")) {
+          branchBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return {};
+        }
+        if (path.endsWith("/progress") || path.endsWith("/revisions")) {
+          return {};
+        }
+        throw new Error(`Unexpected bridge path: ${path}`);
+      }),
+    } as unknown as McpBridgeClient;
+    const createMessage = vi.fn(async () => ({
+      model: "test-model",
+      role: "assistant" as const,
+      content: {
+        type: "text" as const,
+        text: '{"replacement":"Forked candidate"}',
+      },
+    }));
+    const server = { server: { createMessage } } as unknown as McpServer;
+    const dispatcher = new SamplingDispatcher(
+      server,
+      bridge,
+      "dispatcher-1",
+      createPiSessionForkCapability({
+        currentSessionId: "parent-session",
+        currentNodeId: "parent-node",
+        nativeFork,
+      }),
+    );
+
+    await expect(dispatcher.dispatchNext(false)).resolves.toBe("dispatched");
+    expect(nativeFork).toHaveBeenCalledOnce();
+    expect(branchBody).toEqual({
+      branchMode: "native",
+      sourceSessionId: "fork-session",
+      sourceNodeId: "fork-node",
+    });
+    expect(claim.task.branchMode).toBe("native");
+    expect(claim.task.sourceSessionId).toBe("fork-session");
+  });
+
+  it("stays on the logical branch when native fork is unavailable", async () => {
+    const claim = fixture();
+    let branchBody: Record<string, unknown> | undefined;
+    const bridge = {
+      request: vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/v1/dispatch/claim") {
+          return { claim, autoDispatch: true, maxTokens: 2048 };
+        }
+        if (path.endsWith("/branch")) {
+          branchBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return {};
+        }
+        if (path.endsWith("/progress") || path.endsWith("/revisions")) {
+          return {};
+        }
+        throw new Error(`Unexpected bridge path: ${path}`);
+      }),
+    } as unknown as McpBridgeClient;
+    const createMessage = vi.fn(async () => ({
+      model: "test-model",
+      role: "assistant" as const,
+      content: {
+        type: "text" as const,
+        text: '{"replacement":"Logical candidate"}',
+      },
+    }));
+    const server = { server: { createMessage } } as unknown as McpServer;
+    const dispatcher = new SamplingDispatcher(server, bridge, "dispatcher-1");
+
+    await expect(dispatcher.dispatchNext(false)).resolves.toBe("dispatched");
+    expect(branchBody).toEqual({ branchMode: "logical" });
+    expect(createMessage).toHaveBeenCalled();
+    const samplingRequest = createMessage.mock.calls.at(0)?.at(0) as
+      | { includeContext?: string }
+      | undefined;
+    expect(samplingRequest).toMatchObject({
+      includeContext: "none",
+    });
+  });
+
+  it("submits candidates only via revision APIs (no parent writeback)", async () => {
+    const claim = fixture();
+    const paths: string[] = [];
+    const bridge = {
+      request: vi.fn(async (path: string) => {
+        paths.push(path);
+        if (path === "/v1/dispatch/claim") {
+          return { claim, autoDispatch: true, maxTokens: 2048 };
+        }
+        if (
+          path.endsWith("/progress") ||
+          path.endsWith("/revisions") ||
+          path.endsWith("/branch")
+        ) {
+          return {};
+        }
+        throw new Error(`Unexpected bridge path: ${path}`);
+      }),
+    } as unknown as McpBridgeClient;
+    const createMessage = vi.fn(async () => ({
+      model: "test-model",
+      role: "assistant" as const,
+      content: {
+        type: "text" as const,
+        text: '{"replacement":"No parent writeback"}',
+      },
+    }));
+    const server = { server: { createMessage } } as unknown as McpServer;
+    const dispatcher = new SamplingDispatcher(server, bridge, "dispatcher-1");
+
+    await dispatcher.dispatchNext(false);
+    expect(paths.some((path) => path.endsWith("/revisions"))).toBe(true);
+    expect(
+      paths.some(
+        (path) =>
+          path.includes("parent") ||
+          path.includes("writeback") ||
+          path.includes("conversation"),
+      ),
+    ).toBe(false);
+  });
+
 });

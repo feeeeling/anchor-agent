@@ -14,7 +14,7 @@ The stdio MCP process negotiates the connected client's capabilities after initi
 1. If the client supports `sampling/createMessage`, the process leases pending instructions from the extension and automatically asks the host to generate a candidate.
 2. If the client also supports sampling tools, the sampling loop offers only Anchor's read-document and search-workspace tools. Tool calls are executed by the trusted extension bridge.
 3. If sampling is unavailable, an Agent claims work explicitly with `anchor.claim_task`. Optional `sourceSessionId` and `sourceNodeId` bind that logical task branch to host context.
-4. Native host session forks remain an adapter-level capability. In their absence, instruction and revision history in `TaskService` is the branch of record.
+4. Native host session forks remain an adapter-level capability (`src/session-branch.ts`, ADR 0004). When available, claim/sampling fork from the current node; otherwise `TaskService` instruction/revision history is the logical branch of record, with no fake native IDs and no parent conversation writeback.
 
 Claims use expiring leases. Failed automatic dispatches back off and retry three times; the user may then retry explicitly. Candidate application remains exclusively in the editor extension.
 

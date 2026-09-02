@@ -73,6 +73,7 @@ export class BridgeServer implements vscode.Disposable {
       const clarificationMatch = /^\/v1\/tasks\/([^/]+)\/clarification$/.exec(
         url.pathname,
       );
+      const branchMatch = /^\/v1\/tasks\/([^/]+)\/branch$/.exec(url.pathname);
       const dispatchFailureMatch =
         /^\/v1\/dispatch\/instructions\/([^/]+)\/fail$/.exec(url.pathname);
 
@@ -93,6 +94,9 @@ export class BridgeServer implements vscode.Disposable {
             ? { sourceSessionId: body.sourceSessionId }
             : {}),
           ...(body.sourceNodeId ? { sourceNodeId: body.sourceNodeId } : {}),
+          ...(body.branchMode === "native" || body.branchMode === "logical"
+            ? { branchMode: body.branchMode }
+            : {}),
         };
         const claim = await this.tasks.claimInstruction(claimRequest);
         this.json(response, 200, {
@@ -136,6 +140,18 @@ export class BridgeServer implements vscode.Disposable {
       }
       if (request.method === "POST" && url.pathname === "/v1/search") {
         await this.searchWorkspace(await this.readBody(request), response);
+        return;
+      }
+      if (request.method === "POST" && branchMatch?.[1]) {
+        const body = await this.readBody(request);
+        if (!isBranchBindRequest(body)) {
+          throw new Error("branchMode must be native or logical");
+        }
+        const task = await this.tasks.bindBranch(
+          decodeURIComponent(branchMatch[1]),
+          body,
+        );
+        this.json(response, 200, this.tasks.publicView(task));
         return;
       }
       if (request.method === "POST" && progressMatch?.[1]) {
@@ -328,6 +344,7 @@ function isDispatchClaimRequest(value: unknown): value is {
   taskId?: string;
   sourceSessionId?: string;
   sourceNodeId?: string;
+  branchMode?: "native" | "logical";
 } {
   if (!value || typeof value !== "object") {
     return false;
@@ -337,6 +354,20 @@ function isDispatchClaimRequest(value: unknown): value is {
     typeof candidate.dispatcherId === "string" &&
     typeof candidate.leaseMs === "number" &&
     (candidate.mode === "auto" || candidate.mode === "manual")
+  );
+}
+
+function isBranchBindRequest(value: unknown): value is {
+  branchMode: "native" | "logical";
+  sourceSessionId?: string;
+  sourceNodeId?: string;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.branchMode === "native" || candidate.branchMode === "logical"
   );
 }
 
