@@ -60,6 +60,8 @@ The JSON was not written (or was only copied) to a path Pi reads, or Pi has not 
 
 Confirm that the server uses `"lifecycle": "keep-alive"` and that Pi advertises Sampling. A lazy MCP process cannot observe a task created before the server is connected.
 
+After about 12 seconds with no dispatch attempt, the task details panel shows a stall checklist (MCP connection, `/reload`, Sampling authorization, or manual `anchor.claim_task`). The banner clears automatically once an Agent claims the instruction.
+
 ### `node` is not found
 
 GUI-launched hosts may not inherit the shell `PATH`. Replace `"command": "node"` with the absolute path reported by:
