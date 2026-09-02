@@ -84,3 +84,26 @@ command -v node
 ### Multiple VS Code windows are open
 
 Keep `ANCHOR_AGENT_WORKSPACE` set to the intended workspace. You can also use `anchor.list_connections` and `anchor.use_connection` to select a window explicitly.
+
+## Session fork adapter (optional)
+
+By default Anchor keeps a **logical** task branch (`branchId` + instruction/revision history). Pi does not need a fork RPC for Sampling or `anchor.claim_task` to work.
+
+When Pi can fork from the current session node, inject that capability into the MCP process:
+
+```ts
+import {
+  configureSessionForkCapability,
+  createPiSessionForkCapability,
+} from "./session-branch.js";
+
+configureSessionForkCapability(
+  createPiSessionForkCapability({
+    currentSessionId: pi.currentSessionId,
+    currentNodeId: pi.currentNodeId,
+    nativeFork: (input) => pi.forkSession(input), // host-supplied RPC
+  }),
+);
+```
+
+Optional env hints `ANCHOR_AGENT_SESSION_ID` / `ANCHOR_AGENT_NODE_ID` only supply current IDs; they never enable native fork by themselves. After a successful claim, Anchor stores forked `sourceSessionId` / `sourceNodeId` on the task. Candidates still go only through `anchor.submit_revision` — never back into the parent Pi conversation.
