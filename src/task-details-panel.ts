@@ -1,36 +1,16 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import {
-  STALL_HINT_CHECKLIST,
   isDispatchNeverStarted,
-  shouldShowStallHints,
   stallHintDelayRemaining,
 } from "./stall-hints.js";
 import type { TaskService } from "./task-service.js";
 import type { EditTask } from "./types.js";
 import { renderTaskDetailsHtml } from "./task-details-html.js";
-
-const TERMINAL_STATES = new Set([
-  "applied",
-  "cancelled",
-  "rejected",
-  "archived",
-]);
-
-interface PanelMessage {
-  type:
-    | "ready"
-    | "accept"
-    | "reject"
-    | "copy"
-    | "openDiff"
-    | "continue"
-    | "retry"
-    | "cancel"
-    | "answerClarification";
-  instruction?: string;
-  answer?: string;
-}
+import {
+  buildTaskDetailsViewModel,
+  decodeTaskDetailsMessage,
+} from "./task-details-messages.js";
 
 interface PanelEntry {
   panel: vscode.WebviewPanel;
@@ -137,9 +117,6 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
     panel: vscode.WebviewPanel,
     task: EditTask,
   ): Promise<void> {
-    const revision =
-      task.revisions.find((item) => item.id === task.activeRevisionId) ??
-      task.revisions.at(-1);
     let localText = task.baseText;
     let currentDocumentVersion = task.baseDocumentVersion;
     try {
@@ -159,55 +136,14 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       return;
     }
     this.scheduleStallRefresh(task.id, task);
-    const showStallHints = shouldShowStallHints(task);
+    const viewModel = buildTaskDetailsViewModel(task, {
+      localText,
+      currentDocumentVersion,
+    });
     try {
       await panel.webview.postMessage({
         type: "task",
-        task: {
-          id: task.id,
-          title: task.title,
-          taskState: task.taskState,
-          anchorState: task.anchorState,
-          instruction: task.instruction,
-          progress: task.progress?.message ?? "",
-          lastError: latestFailedInstruction(task)?.lastError ?? "",
-          showFailureError:
-            task.taskState === "failed" ||
-            Boolean(latestFailedInstruction(task)?.lastError),
-          baseText: task.baseText,
-          localText,
-          currentDocumentVersion,
-          candidate: revision?.replacement ?? "",
-          summary: revision?.summary ?? "",
-          warnings: revision?.warnings ?? [],
-          revisionCount: task.revisions.length,
-          instructionCount: task.instructions.length,
-          hasCandidate: revision !== undefined,
-          canAccept:
-            revision !== undefined &&
-            !TERMINAL_STATES.has(task.taskState) &&
-            task.taskState !== "applying",
-          canReject:
-            revision !== undefined &&
-            !TERMINAL_STATES.has(task.taskState) &&
-            task.taskState !== "applying",
-          canCopy: revision !== undefined,
-          canContinue:
-            !TERMINAL_STATES.has(task.taskState) &&
-            task.taskState !== "applying",
-          canRetry:
-            !TERMINAL_STATES.has(task.taskState) &&
-            task.taskState !== "applying" &&
-            task.instructions.some((item) => item.status === "failed"),
-          waitingForUser: task.taskState === "waitingForUser",
-          clarificationQuestion: task.clarification?.question ?? "",
-          clarificationOptions: task.clarification?.options ?? [],
-          canAnswerClarification:
-            task.taskState === "waitingForUser" &&
-            Boolean(task.clarification?.question),
-          showStallHints,
-          stallHints: showStallHints ? [...STALL_HINT_CHECKLIST] : [],
-        },
+        task: viewModel,
       });
     } catch {
       // The panel can close while the current document is being read.
@@ -215,7 +151,7 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
   }
 
   private async handleMessage(taskId: string, value: unknown): Promise<void> {
-    const message = decodeMessage(value);
+    const message = decodeTaskDetailsMessage(value);
     if (!message) {
       return;
     }
@@ -296,57 +232,4 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
   private async post(taskId: string, message: unknown): Promise<void> {
     await this.panels.get(taskId)?.panel.webview.postMessage(message);
   }
-}
-
-function latestFailedInstruction(task: EditTask) {
-  for (let index = task.instructions.length - 1; index >= 0; index -= 1) {
-    const instruction = task.instructions[index];
-    if (instruction?.status === "failed" && instruction.lastError) {
-      return instruction;
-    }
-  }
-  return undefined;
-}
-
-function decodeMessage(value: unknown): PanelMessage | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const candidate = value as Record<string, unknown>;
-  const supported = [
-    "ready",
-    "accept",
-    "reject",
-    "copy",
-    "openDiff",
-    "continue",
-    "retry",
-    "cancel",
-    "answerClarification",
-  ];
-  if (
-    typeof candidate.type !== "string" ||
-    !supported.includes(candidate.type)
-  ) {
-    return undefined;
-  }
-  if (
-    candidate.instruction !== undefined &&
-    typeof candidate.instruction !== "string"
-  ) {
-    return undefined;
-  }
-  if (
-    candidate.answer !== undefined &&
-    typeof candidate.answer !== "string"
-  ) {
-    return undefined;
-  }
-  return {
-    type: candidate.type as PanelMessage["type"],
-    ...(typeof candidate.instruction === "string"
-      ? { instruction: candidate.instruction }
-      : {}),
-    ...(typeof candidate.answer === "string" ? { answer: candidate.answer } : {}),
-  };
 }
