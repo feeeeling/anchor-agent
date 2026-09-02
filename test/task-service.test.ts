@@ -200,3 +200,65 @@ describe("TaskService clarification reply channel", () => {
     );
   });
 });
+
+describe("TaskService sampling dispatch failures", () => {
+  it("failInstruction keeps actionable errors and ends failed after 3 attempts", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const instructionId = task.instructions[0]?.id;
+    if (!instructionId) {
+      throw new Error("missing instruction");
+    }
+
+    const actionable =
+      "Sampling was rejected or not authorized. Approve the Sampling prompt in Pi " +
+      "(or enable samplingAutoApprove), then click Retry. " +
+      "Or claim the task manually with anchor.claim_task.";
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const currentBefore = service.get(task.id);
+      const open = currentBefore?.instructions.find((item) => item.id === instructionId);
+      if (open?.status === "dispatching") {
+        // Expire the backoff lease so the next claim can proceed in-test.
+        open.leaseUntil = Date.now() - 1;
+      }
+
+      const claim = await service.claimInstruction({
+        dispatcherId: `dispatcher-${attempt}`,
+        leaseMs: 30_000,
+        taskId: task.id,
+      });
+      expect(claim?.instruction.id).toBe(instructionId);
+      expect(claim?.instruction.dispatchAttempts).toBe(attempt);
+
+      await service.failInstruction(
+        instructionId,
+        `dispatcher-${attempt}`,
+        actionable,
+      );
+
+      const current = service.get(task.id);
+      expect(current?.instructions[0]?.lastError).toBe(actionable);
+      expect(current?.instructions[0]?.dispatchAttempts).toBe(attempt);
+      expect(current?.progress?.message).toContain("Approve the Sampling prompt");
+
+      if (attempt < 3) {
+        expect(current?.taskState).toBe("queued");
+        expect(current?.progress?.stage).toBe("retrying");
+        expect(current?.instructions[0]?.status).toBe("dispatching");
+        expect(current?.progress?.message).toMatch(/Automatic retry/);
+      } else {
+        expect(current?.taskState).toBe("failed");
+        expect(current?.progress?.stage).toBe("failed");
+        expect(current?.instructions[0]?.status).toBe("failed");
+        expect(current?.progress?.message).toBe(actionable);
+      }
+    }
+
+    const retried = await service.retryTask(task.id);
+    expect(retried.status).toBe("pending");
+    expect(retried.dispatchAttempts).toBe(0);
+    expect(retried.lastError).toBeUndefined();
+    expect(service.get(task.id)?.taskState).toBe("created");
+  });
+});
