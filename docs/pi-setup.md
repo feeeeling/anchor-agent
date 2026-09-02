@@ -62,7 +62,6 @@ Confirm that the server uses `"lifecycle": "keep-alive"` and that Pi advertises 
 
 After about 12 seconds with no dispatch attempt, the task details panel shows a stall checklist (MCP connection, `/reload`, Sampling authorization, or manual `anchor.claim_task`). The banner clears automatically once an Agent claims the instruction.
 
-
 ### Sampling fails and the task ends in `failed`
 
 Automatic Sampling failures no longer leave the task looking stuck in `created`. After up to three dispatch attempts the task moves to `failed`, and the task details panel shows an actionable error (also stored as `lastError`), for example:
