@@ -136,14 +136,13 @@ export class TaskDetailsPanelManager implements vscode.Disposable {
       return;
     }
     this.scheduleStallRefresh(task.id, task);
-    const viewModel = buildTaskDetailsViewModel(task, {
-      localText,
-      currentDocumentVersion,
-    });
     try {
       await panel.webview.postMessage({
         type: "task",
-        task: viewModel,
+        task: buildTaskDetailsViewModel(task, {
+          localText,
+          currentDocumentVersion,
+        }),
       });
     } catch {
       // The panel can close while the current document is being read.
