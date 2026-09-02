@@ -1,6 +1,37 @@
 import * as vscode from "vscode";
 import type { TaskService } from "./task-service.js";
-import type { EditTask } from "./types.js";
+import type { EditTask, TaskState } from "./types.js";
+
+const TERMINAL_STATES = new Set<TaskState>([
+  "applied",
+  "cancelled",
+  "rejected",
+  "archived",
+]);
+
+/**
+ * Space-separated TreeItem.contextValue tokens for view/item/context when clauses.
+ * Keeps legacy `anchorTask.<state>` and adds capability flags used by package.json menus.
+ */
+export function contextValueFor(task: EditTask): string {
+  const parts = [`anchorTask.${task.taskState}`];
+  const hasCandidate =
+    task.revisions.find((item) => item.id === task.activeRevisionId) !==
+      undefined || task.revisions.length > 0;
+  const actionable =
+    !TERMINAL_STATES.has(task.taskState) && task.taskState !== "applying";
+
+  if (hasCandidate) {
+    parts.push("hasCandidate");
+  }
+  if (actionable) {
+    parts.push("cancellable");
+  }
+  if (actionable && hasCandidate) {
+    parts.push("rejectable");
+  }
+  return parts.join(" ");
+}
 
 export class TaskTreeProvider
   implements vscode.TreeDataProvider<EditTask>, vscode.Disposable
@@ -29,7 +60,7 @@ export class TaskTreeProvider
         `State: \`${task.taskState}\` · Anchor: \`${task.anchorState}\` · Revisions: ${task.revisions.length}`,
     );
     item.iconPath = new vscode.ThemeIcon(iconFor(task));
-    item.contextValue = `anchorTask.${task.taskState}`;
+    item.contextValue = contextValueFor(task);
     item.command = {
       command: "anchorAgent.reviewTask",
       title: "Review task",

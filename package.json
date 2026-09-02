@@ -93,6 +93,30 @@
         }
       ]
     },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "anchorAgent.openDiff",
+          "when": "view == anchorAgent.tasks && viewItem =~ /hasCandidate/",
+          "group": "1_review@1"
+        },
+        {
+          "command": "anchorAgent.copyCandidate",
+          "when": "view == anchorAgent.tasks && viewItem =~ /hasCandidate/",
+          "group": "1_review@2"
+        },
+        {
+          "command": "anchorAgent.rejectTask",
+          "when": "view == anchorAgent.tasks && viewItem =~ /rejectable/",
+          "group": "1_review@3"
+        },
+        {
+          "command": "anchorAgent.cancelTask",
+          "when": "view == anchorAgent.tasks && viewItem =~ /cancellable/",
+          "group": "2_lifecycle@1"
+        }
+      ]
+    },
     "configuration": {
       "title": "Anchor Agent",
       "properties": {
