@@ -9,6 +9,14 @@ import type {
 import { z } from "zod";
 import type { McpBridgeClient } from "./mcp-bridge-client.js";
 import { formatSamplingFailure } from "./sampling-errors.js";
+import {
+  PARENT_WRITEBACK_POLICY,
+  assertNoParentWriteback,
+  claimFieldsFromBinding,
+  ensureTaskBranch,
+  getConfiguredSessionForkCapability,
+  type SessionForkCapability,
+} from "./session-branch.js";
 import type { EditTask, TaskInstruction } from "./types.js";
 
 interface DispatchClaim {
@@ -68,6 +76,7 @@ export class SamplingDispatcher {
     private readonly server: McpServer,
     private readonly bridge: McpBridgeClient,
     private readonly dispatcherId: string,
+    private readonly sessionFork: SessionForkCapability = getConfiguredSessionForkCapability(),
   ) {}
 
   async start(): Promise<void> {
@@ -110,12 +119,59 @@ export class SamplingDispatcher {
     if (!response.claim) {
       return "idle";
     }
+
+    // After a successful claim, attach native fork metadata from the current
+    // session node when the host adapter supports it; otherwise keep logical.
+    await this.attachTaskBranch(response.claim);
+
     await this.dispatch(
       response.claim,
       supportsTools,
       response.maxTokens ?? 8_192,
     );
     return "dispatched";
+  }
+
+  /**
+   * Bind the claimed task to a native forked session/node or the logical branch.
+   * Never invents fake native IDs; never writes results back to the parent chat.
+   */
+  private async attachTaskBranch(claim: DispatchClaim): Promise<void> {
+    const bound = await ensureTaskBranch({
+      hasNativeFork: this.sessionFork.hasNativeFork,
+      ...(this.sessionFork.forkFromCurrentNode
+        ? { forkFromCurrentNode: this.sessionFork.forkFromCurrentNode }
+        : {}),
+      ...(this.sessionFork.currentSessionId
+        ? { currentSessionId: this.sessionFork.currentSessionId }
+        : {}),
+      ...(this.sessionFork.currentNodeId
+        ? { currentNodeId: this.sessionFork.currentNodeId }
+        : {}),
+      existing: {
+        branchId: claim.task.branchId,
+        ...(claim.task.sourceSessionId
+          ? { sourceSessionId: claim.task.sourceSessionId }
+          : {}),
+        ...(claim.task.sourceNodeId ? { sourceNodeId: claim.task.sourceNodeId } : {}),
+        ...(claim.task.branchMode ? { branchMode: claim.task.branchMode } : {}),
+      },
+    });
+    const fields = claimFieldsFromBinding(bound);
+    claim.task.branchMode = bound.mode;
+    if (bound.sourceSessionId) {
+      claim.task.sourceSessionId = bound.sourceSessionId;
+    }
+    if (bound.sourceNodeId) {
+      claim.task.sourceNodeId = bound.sourceNodeId;
+    }
+    await this.bridge.request(
+      `/v1/tasks/${encodeURIComponent(claim.task.id)}/branch`,
+      {
+        method: "POST",
+        body: JSON.stringify(fields),
+      },
+    );
   }
 
   stop(): void {
@@ -128,6 +184,11 @@ export class SamplingDispatcher {
     maxTokens: number,
   ): Promise<void> {
     try {
+      // Invariant: never write candidates or summaries back to the parent
+      // conversation. Only Anchor revision APIs receive the result.
+      assertNoParentWriteback([
+        { type: PARENT_WRITEBACK_POLICY.candidateSubmissionChannel },
+      ]);
       await this.reportProgress(
         claim.task.id,
         "sampling",
@@ -318,6 +379,7 @@ function buildPrompt(claim: DispatchClaim, supportsTools: boolean): string {
 function systemPrompt(supportsTools: boolean): string {
   return [
     "You perform one local text edit. Never attempt to write files or return a patch for other ranges.",
+    "Do not write completion summaries or candidates back into the parent conversation; Anchor records results only through submit_revision.",
     "Preserve syntax, formatting, commands, references, and surrounding-language conventions unless instructed otherwise.",
     supportsTools
       ? "You may use only the provided read-only tools."
