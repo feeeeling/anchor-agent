@@ -29,7 +29,7 @@ Download `anchor-agent-0.1.1.vsix` from the latest GitHub prerelease and install
 code --install-extension anchor-agent-0.1.1.vsix
 ```
 
-In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette, choose your host, and save the copied JSON in its MCP configuration. For Pi, save it as `.mcp.json` or `~/.config/mcp/mcp.json`, then run `/reload`; the generated keep-alive configuration allows tasks created later to dispatch automatically. See the [Pi setup guide](docs/pi-setup.md).
+In VS Code, run **Anchor Agent: Copy MCP Configuration** from the Command Palette, choose your host, then either copy to the clipboard or write `.mcp.json` / `~/.config/mcp/mcp.json` after a diff preview and explicit confirm. For Pi, run `/reload` afterward; the generated keep-alive configuration allows tasks created later to dispatch automatically. See the [Pi setup guide](docs/pi-setup.md).
 
 Then select text and run **Anchor Agent: Rewrite Selection** or press `Cmd+Shift+I` / `Ctrl+Shift+I`.
 
