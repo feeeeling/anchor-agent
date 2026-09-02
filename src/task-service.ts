@@ -180,7 +180,8 @@ export class TaskService implements vscode.Disposable {
       if (
         (request.taskId && task.id !== request.taskId) ||
         TERMINAL_STATES.has(task.taskState) ||
-        task.taskState === "orphaned"
+        task.taskState === "orphaned" ||
+        task.taskState === "waitingForUser"
       ) {
         continue;
       }
@@ -415,9 +416,78 @@ export class TaskService implements vscode.Disposable {
     this.ensureMutable(task, "request clarification for");
     task.clarification = { question, ...(options?.length ? { options } : {}) };
     task.taskState = "waitingForUser";
+    task.progress = {
+      stage: "waitingForUser",
+      message: question,
+    };
     task.updatedAt = Date.now();
     await this.changed();
     return task;
+  }
+
+  /**
+   * Returns a user clarification answer to the Agent via instruction continuation:
+   * the open dispatching/pending turn is reused (or a new pending turn is created)
+   * so claim_task / sampling can pick it up. Not a deferred MCP tool result.
+   */
+  async answerClarification(
+    taskId: string,
+    answer: string,
+  ): Promise<TaskInstruction> {
+    const task = this.require(taskId);
+    if (task.taskState !== "waitingForUser" || !task.clarification) {
+      throw new Error("This task is not waiting for a clarification answer");
+    }
+    const trimmed = answer.trim();
+    if (!trimmed) {
+      throw new Error("Clarification answer must not be empty");
+    }
+    const text = formatClarificationAnswerInstruction(
+      task.clarification,
+      trimmed,
+    );
+    const open = [...task.instructions]
+      .reverse()
+      .find(
+        (item) =>
+          item.status === "pending" || item.status === "dispatching",
+      );
+    const now = Date.now();
+    let pending: TaskInstruction;
+    if (open) {
+      open.text = text;
+      open.status = "pending";
+      open.dispatchAttempts = 0;
+      delete open.dispatcherId;
+      delete open.leaseUntil;
+      delete open.lastError;
+      pending = open;
+    } else {
+      pending = {
+        id: randomUUID(),
+        text,
+        status: "pending",
+        dispatchAttempts: 0,
+        createdAt: now,
+        ...(task.activeRevisionId
+          ? { parentRevisionId: task.activeRevisionId }
+          : {}),
+      };
+      task.instructions.push(pending);
+    }
+    task.instruction = text;
+    delete task.clarification;
+    task.progress = {
+      stage: "queued",
+      message: "Clarification answered; waiting for a connected Agent",
+    };
+    task.taskState =
+      task.anchorState === "modified" || task.anchorState === "orphaned"
+        ? "conflicted"
+        : "created";
+    task.updatedAt = now;
+    await this.changed();
+    return pending;
   }
 
   async cancelTask(taskId: string): Promise<EditTask> {
@@ -502,4 +572,22 @@ export class TaskService implements vscode.Disposable {
     await this.state.update(STORAGE_KEY, this.list());
     this.changeEmitter.fire();
   }
+}
+
+export function formatClarificationAnswerInstruction(
+  clarification: { question: string; options?: string[] },
+  answer: string,
+): string {
+  const lines = [
+    "Clarification answer from the user:",
+    `Question: ${clarification.question}`,
+  ];
+  if (clarification.options?.length) {
+    lines.push(`Options offered: ${clarification.options.join(" | ")}`);
+  }
+  lines.push(`Answer: ${answer}`);
+  lines.push(
+    "Continue the anchored edit using this answer. Do not ask the same clarification again unless still blocked.",
+  );
+  return lines.join("\n");
 }
