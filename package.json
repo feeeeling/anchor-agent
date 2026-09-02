@@ -65,6 +65,10 @@
         "title": "Anchor Agent: Continue Refining Candidate"
       },
       {
+        "command": "anchorAgent.answerClarification",
+        "title": "Anchor Agent: Answer Clarification"
+      },
+      {
         "command": "anchorAgent.retryTask",
         "title": "Anchor Agent: Retry Failed Task"
       },

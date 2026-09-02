@@ -2,6 +2,7 @@
 
 ## 0.1.1
 
+- Added a task-details reply channel so clarification answers return to the Agent as pending instruction turns.
 - Added explicit Reject Candidate and Copy Candidate review actions.
 - Prevented late Agent progress, clarification, retry, and revision updates from reviving terminal tasks.
 - Invalidated pending instruction leases when a user cancels or rejects a task.
