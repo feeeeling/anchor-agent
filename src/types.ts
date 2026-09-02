@@ -70,6 +70,8 @@ export interface EditTask {
   sourceSessionId?: string;
   sourceNodeId?: string;
   branchId: string;
+  /** native = host forked session; logical = task-local history only */
+  branchMode?: "native" | "logical";
   instructions: TaskInstruction[];
   revisions: Revision[];
   activeRevisionId?: string;
@@ -86,10 +88,4 @@ export interface TextChange {
   rangeOffset: number;
   rangeLength: number;
   text: string;
-}
-
-export interface AnchorSpan {
-  start: number;
-  end: number;
-  state: AnchorState;
 }

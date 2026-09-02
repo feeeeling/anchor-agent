@@ -2,6 +2,7 @@
 
 ## 0.1.1
 
+- Added a Pi session fork adapter: native fork from the current node when the host injects fork capability, otherwise logical branch; task results are never written back to the parent conversation.
 - Surface actionable Sampling failure errors in task progress/`lastError` and the details panel (Retry enabled when failed).
 - Added a task-details reply channel so clarification answers return to the Agent as pending instruction turns.
 - Added explicit Reject Candidate and Copy Candidate review actions.
