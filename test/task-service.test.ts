@@ -24,10 +24,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import {
-  TaskService,
-  formatClarificationAnswerInstruction,
-} from "../src/task-service.js";
+import { TaskService } from "../src/task-service.js";
 
 class MemoryState {
   private tasks: unknown[] = [];
