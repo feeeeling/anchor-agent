@@ -250,12 +250,13 @@ export class TaskService implements vscode.Disposable {
         task.taskState = "queued";
         task.progress = {
           stage: "retrying",
-          message: `Agent dispatch failed; retrying (${instruction.dispatchAttempts}/3)`,
+          message: `${message} Automatic retry ${instruction.dispatchAttempts}/3…`,
         };
       } else {
         instruction.status = "failed";
         delete instruction.leaseUntil;
         task.taskState = "failed";
+        // Keep the actionable sampling/bridge message on final failure (panel + lastError).
         task.progress = { stage: "failed", message };
       }
       task.updatedAt = Date.now();
