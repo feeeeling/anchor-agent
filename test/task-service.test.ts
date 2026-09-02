@@ -8,7 +8,7 @@ vi.mock("vscode", () => ({
       return { dispose: () => undefined };
     };
     fire(value: T): void {
-      for (const listener of this.listeners) {
+      for (the listener of this.listeners) {
         listener(value);
       }
     }
@@ -24,10 +24,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import {
-  TaskService,
-  formatClarificationAnswerInstruction,
-} from "../src/task-service.js";
+import { TaskService } from "../src/task-service.js";
 
 class MemoryState {
   private tasks: unknown[] = [];
