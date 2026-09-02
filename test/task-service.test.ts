@@ -262,3 +262,177 @@ describe("TaskService sampling dispatch failures", () => {
     expect(service.get(task.id)?.taskState).toBe("created");
   });
 });
+
+describe("TaskService create/claim/lease/submit lifecycle", () => {
+  it("creates a logical branch and leases then completes a revision", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await service.create(
+      createDocument() as never,
+      {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 5 },
+      } as never,
+      "Rewrite greeting",
+      { sourceSessionId: "session-a", sourceNodeId: "node-1" },
+    );
+
+    expect(task.taskState).toBe("created");
+    expect(task.branchMode).toBe("logical");
+    expect(task.sourceSessionId).toBe("session-a");
+    expect(task.sourceNodeId).toBe("node-1");
+    expect(task.instructions[0]?.status).toBe("pending");
+
+    const claim = await service.claimInstruction({
+      dispatcherId: "agent-lease",
+      leaseMs: 30_000,
+      taskId: task.id,
+      branchMode: "native",
+      sourceSessionId: "session-b",
+    });
+    expect(claim?.instruction.status).toBe("dispatching");
+    expect(claim?.instruction.dispatcherId).toBe("agent-lease");
+    expect(claim?.instruction.leaseUntil).toBeGreaterThan(Date.now());
+    expect(claim?.instruction.dispatchAttempts).toBe(1);
+    expect(service.get(task.id)?.taskState).toBe("queued");
+    expect(service.get(task.id)?.branchMode).toBe("native");
+    expect(service.get(task.id)?.sourceSessionId).toBe("session-b");
+
+    await expect(
+      service.claimInstruction({
+        dispatcherId: "other",
+        leaseMs: 30_000,
+        taskId: task.id,
+      }),
+    ).resolves.toBeUndefined();
+
+    const revision = await service.submitRevision(task.id, {
+      instructionId: claim!.instruction.id,
+      replacement: "Hello",
+      summary: "greet",
+    });
+    const ready = service.get(task.id);
+    expect(revision.replacement).toBe("Hello");
+    expect(ready?.taskState).toBe("ready");
+    expect(ready?.activeRevisionId).toBe(revision.id);
+    expect(ready?.instructions[0]?.status).toBe("completed");
+    expect(ready?.progress?.stage).toBe("completed");
+  });
+
+  it("reclaims after lease expiry", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const first = await service.claimInstruction({
+      dispatcherId: "first",
+      leaseMs: 5_000,
+      taskId: task.id,
+    });
+    const open = service.get(task.id)?.instructions.find(
+      (item) => item.id === first?.instruction.id,
+    );
+    if (!open) {
+      throw new Error("missing leased instruction");
+    }
+    open.leaseUntil = Date.now() - 1;
+
+    const second = await service.claimInstruction({
+      dispatcherId: "second",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(second?.instruction.dispatcherId).toBe("second");
+    expect(second?.instruction.dispatchAttempts).toBe(2);
+  });
+
+  it("bindBranch updates mode and source metadata", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    expect(task.branchMode).toBe("logical");
+
+    const bound = await service.bindBranch(task.id, {
+      branchMode: "native",
+      sourceSessionId: "sess-9",
+      sourceNodeId: "node-9",
+    });
+    expect(bound.branchMode).toBe("native");
+    expect(bound.sourceSessionId).toBe("sess-9");
+    expect(bound.sourceNodeId).toBe("node-9");
+
+    await service.cancelTask(task.id);
+    await expect(
+      service.bindBranch(task.id, { branchMode: "logical" }),
+    ).rejects.toThrow(/cancelled/);
+  });
+
+  it("waitingForUser blocks claim until clarification is answered", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    await service.claimInstruction({
+      dispatcherId: "agent",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    await service.requestClarification(task.id, "Pick a style", ["a", "b"]);
+    expect(service.get(task.id)?.taskState).toBe("waitingForUser");
+    await expect(
+      service.claimInstruction({
+        dispatcherId: "agent-2",
+        leaseMs: 30_000,
+        taskId: task.id,
+      }),
+    ).resolves.toBeUndefined();
+
+    const pending = await service.answerClarification(task.id, "a");
+    expect(pending.status).toBe("pending");
+    expect(formatClarificationAnswerInstruction(
+      { question: "Pick a style", options: ["a", "b"] },
+      "a",
+    )).toContain("Answer: a");
+  });
+});
+
+describe("TaskService retry after failInstruction", () => {
+  it("retryTask resets a failed instruction for reclaim", async () => {
+    const service = new TaskService(new MemoryState() as never);
+    const task = await createTask(service);
+    const instructionId = task.instructions[0]?.id;
+    if (!instructionId) {
+      throw new Error("missing instruction");
+    }
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const open = service.get(task.id)?.instructions.find(
+        (item) => item.id === instructionId,
+      );
+      if (open?.status === "dispatching") {
+        open.leaseUntil = Date.now() - 1;
+      }
+      await service.claimInstruction({
+        dispatcherId: `dispatcher-${attempt}`,
+        leaseMs: 30_000,
+        taskId: task.id,
+      });
+      await service.failInstruction(
+        instructionId,
+        `dispatcher-${attempt}`,
+        "transient sampling failure",
+      );
+    }
+
+    expect(service.get(task.id)?.taskState).toBe("failed");
+    expect(service.get(task.id)?.instructions[0]?.status).toBe("failed");
+
+    const retried = await service.retryTask(task.id);
+    expect(retried.status).toBe("pending");
+    expect(retried.dispatchAttempts).toBe(0);
+    expect(retried.lastError).toBeUndefined();
+    expect(service.get(task.id)?.taskState).toBe("created");
+
+    const reclaim = await service.claimInstruction({
+      dispatcherId: "after-retry",
+      leaseMs: 30_000,
+      taskId: task.id,
+    });
+    expect(reclaim?.instruction.id).toBe(instructionId);
+    expect(reclaim?.instruction.dispatchAttempts).toBe(1);
+  });
+});
