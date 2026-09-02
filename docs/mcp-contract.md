@@ -43,7 +43,6 @@ Input:
 Modes:
 
 - `snapshot`: immutable task-time snapshot; available for the task document.
-
 - `current`: current unsaved editor content when open, otherwise workspace content.
 
 Workspace settings govern reads outside the task document.
