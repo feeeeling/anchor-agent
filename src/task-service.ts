@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { transformAnchor } from "./anchor-range.js";
 import { sha256 } from "./hash.js";
+import { newLogicalBranchId } from "./session-branch.js";
 import type {
   EditTask,
   Revision,
@@ -31,6 +32,7 @@ export interface ClaimInstructionRequest {
   taskId?: string;
   sourceSessionId?: string;
   sourceNodeId?: string;
+  branchMode?: "native" | "logical";
 }
 
 export class TaskService implements vscode.Disposable {
@@ -93,7 +95,8 @@ export class TaskService implements vscode.Disposable {
       documentSnapshot: document.getText(),
       anchorState: "clean",
       taskState: "created",
-      branchId: `branch-${randomUUID()}`,
+      branchId: newLogicalBranchId(),
+      branchMode: "logical",
       instructions: [
         {
           id: randomUUID(),
@@ -156,6 +159,28 @@ export class TaskService implements vscode.Disposable {
     }
   }
 
+  async bindBranch(
+    taskId: string,
+    branch: {
+      branchMode: "native" | "logical";
+      sourceSessionId?: string;
+      sourceNodeId?: string;
+    },
+  ): Promise<EditTask> {
+    const task = this.require(taskId);
+    this.ensureMutable(task, "bind a branch for");
+    task.branchMode = branch.branchMode;
+    if (branch.sourceSessionId) {
+      task.sourceSessionId = branch.sourceSessionId;
+    }
+    if (branch.sourceNodeId) {
+      task.sourceNodeId = branch.sourceNodeId;
+    }
+    task.updatedAt = Date.now();
+    await this.changed();
+    return task;
+  }
+
   async reportProgress(
     taskId: string,
     progress: TaskProgress,
@@ -213,6 +238,12 @@ export class TaskService implements vscode.Disposable {
         }
         if (request.sourceNodeId) {
           task.sourceNodeId = request.sourceNodeId;
+        }
+        if (request.branchMode === "native" || request.branchMode === "logical") {
+          task.branchMode = request.branchMode;
+        } else if (!task.branchMode) {
+          // Claims without adapter metadata stay on the logical branch.
+          task.branchMode = "logical";
         }
         task.updatedAt = now;
         await this.changed();
