@@ -19,13 +19,17 @@ export interface McpHostConfiguration {
 
 export const ANCHOR_AGENT_SERVER_KEY = "anchor-agent";
 
+/** Existing MCP JSON after parse: empty file → null; otherwise a JSON object. */
+export type ParsedMcpDocument = Record<string, unknown> | null;
+
 export function createMcpConfiguration(
   serverPath: string,
   workspacePath?: string,
   target: McpConfigurationTarget = "standard",
+  nodeCommand = "node",
 ): McpHostConfiguration {
   const server: McpServerEntry = {
-    command: "node",
+    command: nodeCommand,
     args: [serverPath],
   };
   if (workspacePath) {
@@ -104,12 +108,25 @@ export function mergeMcpConfiguration(
  * Parse existing MCP JSON text. Empty / whitespace-only input yields null
  * (treated as no prior file). Invalid JSON throws.
  */
-export function parseMcpConfigurationText(text: string): unknown {
+export function parseMcpConfigurationText(text: string): ParsedMcpDocument {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     return null;
   }
-  return JSON.parse(trimmed) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid MCP configuration JSON: ${message}`);
+  }
+  if (parsed === null) {
+    return null;
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("MCP configuration must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /**

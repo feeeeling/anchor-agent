@@ -24,7 +24,7 @@ The generated Pi entry includes:
   },
   "mcpServers": {
     "anchor-agent": {
-      "command": "node",
+      "command": "/absolute/path/to/node",
       "args": ["/installed/extension/dist/mcp-server.cjs"],
       "env": {
         "ANCHOR_AGENT_WORKSPACE": "/target/workspace"
@@ -75,7 +75,7 @@ The panel enables **Retry** whenever any instruction status is `failed`. Manual 
 
 ### `node` is not found
 
-GUI-launched hosts may not inherit the shell `PATH`. Replace `"command": "node"` with the absolute path reported by:
+Copy MCP Configuration now writes `process.execPath` from the editor, so GUI-launched hosts do not depend on `PATH`. If you pasted an older config that still says `"command": "node"`, replace it with the absolute path reported by:
 
 ```bash
 command -v node

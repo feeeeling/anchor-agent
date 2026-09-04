@@ -33,6 +33,25 @@ describe("createMcpConfiguration", () => {
     });
   });
 
+  it("uses an explicit Node executable when provided", () => {
+    expect(
+      createMcpConfiguration(
+        "/server.cjs",
+        "/workspace",
+        "standard",
+        "/usr/local/bin/node",
+      ),
+    ).toEqual({
+      mcpServers: {
+        "anchor-agent": {
+          command: "/usr/local/bin/node",
+          args: ["/server.cjs"],
+          env: { ANCHOR_AGENT_WORKSPACE: "/workspace" },
+        },
+      },
+    });
+  });
+
   it("keeps the server connected and enables approved sampling for Pi", () => {
     expect(createMcpConfiguration("/server.cjs", "/workspace", "pi")).toEqual({
       settings: { sampling: true, samplingAutoApprove: false },
@@ -69,7 +88,18 @@ describe("parseMcpConfigurationText", () => {
   });
 
   it("throws on invalid JSON", () => {
-    expect(() => parseMcpConfigurationText("{")).toThrow();
+    expect(() => parseMcpConfigurationText("{")).toThrow(
+      /Invalid MCP configuration JSON/,
+    );
+  });
+
+  it("rejects JSON that is not an object", () => {
+    expect(() => parseMcpConfigurationText("[]")).toThrow(
+      "MCP configuration must be a JSON object",
+    );
+    expect(() => parseMcpConfigurationText("42")).toThrow(
+      "MCP configuration must be a JSON object",
+    );
   });
 });
 

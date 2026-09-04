@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- MCP configuration uses the editor Node absolute path so GUI-launched hosts can spawn the stdio server.
+- Invalid MCP JSON is rejected with a named parse error instead of a raw `JSON.parse` throw.
+
 ## 0.1.1
 
 - Added a Pi session fork adapter: native fork from the current node when the host injects fork capability, otherwise logical branch; task results are never written back to the parent conversation.

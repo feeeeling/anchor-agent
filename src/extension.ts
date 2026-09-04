@@ -188,6 +188,7 @@ async function copyMcpConfiguration(
     serverPath,
     workspacePath,
     selected.target,
+    process.execPath,
   );
 
   if (destination.destination.kind === "clipboard") {
